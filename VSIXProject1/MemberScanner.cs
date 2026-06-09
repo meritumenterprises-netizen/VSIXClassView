@@ -66,6 +66,7 @@ namespace VSIXProject1
                     return new MemberItem
                     {
                         Name = v.Identifier.ValueText,
+                        DisplayText = $"{v.Identifier.ValueText} : {GetShortTypeName(f.Declaration.Type)}",
                         Kind = MemberKind.Field,
                         StartOffset = f.SpanStart,
                         NameStartOffset = v.Identifier.SpanStart,
@@ -87,6 +88,7 @@ namespace VSIXProject1
                     return new MemberItem
                     {
                         Name = p.Identifier.ValueText,
+                        DisplayText = $"{p.Identifier.ValueText} : {GetShortTypeName(p.Type)} {GetPropertyAccessorDisplayText(p)}".TrimEnd(),
                         Kind = MemberKind.Property,
                         StartOffset = p.SpanStart,
                         NameStartOffset = p.Identifier.SpanStart,
@@ -109,6 +111,7 @@ namespace VSIXProject1
                     return new MemberItem
                     {
                         Name = m.Identifier.ValueText,
+                        DisplayText = $"{GetShortTypeName(m.ReturnType)} : {m.Identifier.ValueText} ({GetParameterDisplayText(m.ParameterList)})",
                         Kind = MemberKind.Method,
                         StartOffset = m.SpanStart,
                         NameStartOffset = m.Identifier.SpanStart,
@@ -123,6 +126,89 @@ namespace VSIXProject1
                 .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
 
             return fields.Concat(properties).Concat(methods).ToList();
+        }
+
+        private static string GetParameterDisplayText(ParameterListSyntax parameterList)
+        {
+            return string.Join(
+                ", ",
+                parameterList.Parameters.Select(parameter =>
+                    $"{parameter.Identifier.ValueText}: {GetShortTypeName(parameter.Type)}"));
+        }
+
+        private static string GetPropertyAccessorDisplayText(PropertyDeclarationSyntax property)
+        {
+            var accessors = property.AccessorList?.Accessors;
+            if (accessors == null || accessors.Value.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var hasGet = accessors.Value.Any(accessor => accessor.IsKind(SyntaxKind.GetAccessorDeclaration));
+            var hasSet = accessors.Value.Any(accessor => accessor.IsKind(SyntaxKind.SetAccessorDeclaration));
+            var hasInit = accessors.Value.Any(accessor => accessor.IsKind(SyntaxKind.InitAccessorDeclaration));
+
+            if (hasGet && hasSet)
+            {
+                return "get; set;";
+            }
+
+            if (hasGet && hasInit)
+            {
+                return "get; init;";
+            }
+
+            if (hasGet)
+            {
+                return "get;";
+            }
+
+            if (hasSet)
+            {
+                return "set;";
+            }
+
+            return hasInit ? "init;" : string.Empty;
+        }
+
+        private static string GetShortTypeName(TypeSyntax? type)
+        {
+            if (type == null)
+            {
+                return "object";
+            }
+
+            switch (type)
+            {
+                case PredefinedTypeSyntax predefinedType:
+                    return predefinedType.Keyword.ValueText;
+
+                case IdentifierNameSyntax identifierName:
+                    return identifierName.Identifier.ValueText;
+
+                case GenericNameSyntax genericName:
+                    return $"{genericName.Identifier.ValueText}<{string.Join(", ", genericName.TypeArgumentList.Arguments.Select(GetShortTypeName))}>";
+
+                case QualifiedNameSyntax qualifiedName:
+                    return GetShortTypeName(qualifiedName.Right);
+
+                case AliasQualifiedNameSyntax aliasQualifiedName:
+                    return GetShortTypeName(aliasQualifiedName.Name);
+
+                case NullableTypeSyntax nullableType:
+                    return $"{GetShortTypeName(nullableType.ElementType)}?";
+
+                case ArrayTypeSyntax arrayType:
+                    return $"{GetShortTypeName(arrayType.ElementType)}{string.Concat(arrayType.RankSpecifiers.Select(rank => "[" + new string(',', rank.Rank - 1) + "]"))}";
+
+                case TupleTypeSyntax tupleType:
+                    return $"({string.Join(", ", tupleType.Elements.Select(element => string.IsNullOrEmpty(element.Identifier.ValueText)
+                        ? GetShortTypeName(element.Type)
+                        : $"{element.Identifier.ValueText}: {GetShortTypeName(element.Type)}"))})";
+
+                default:
+                    return type.ToString();
+            }
         }
     }
 }

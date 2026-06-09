@@ -10,6 +10,7 @@ namespace VSIXProject1
     {
         public MemberItem() { }
         public required string Name { get; init; }
+        public required string DisplayText { get; init; }
         public required MemberKind Kind { get; init; }
         public required int StartOffset { get; init; }
         public required int NameStartOffset { get; init; }
@@ -20,7 +21,6 @@ namespace VSIXProject1
         public required int NameEndColumn { get; init; }
         public string? SourceFilePath { get; init; }
 
-        public string DisplayText => Name;
         public string GroupHeading => Kind switch
         {
             MemberKind.Field => "Fields",

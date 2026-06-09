@@ -38,7 +38,8 @@ public partial class MembersToolWindowControl : UserControl
         var filteredMembers = string.IsNullOrWhiteSpace(filter)
             ? _allMembers
             : _allMembers.Where(member =>
-                member.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0);
+                member.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                member.DisplayText.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0);
 
         Members.Clear();
 

@@ -23,7 +23,7 @@
         <ListBox x:Name="MembersList"
                  Grid.Row="1"
                  ItemsSource="{Binding Source={StaticResource GroupedMembers}}"
-                 DisplayMemberPath="Name"
+                 DisplayMemberPath="DisplayText"
                  MouseDoubleClick="MembersList_MouseDoubleClick">
             <ListBox.GroupStyle>
                 <GroupStyle>
