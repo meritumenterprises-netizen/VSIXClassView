@@ -10,6 +10,7 @@ namespace VSIXProject1
     {
         Const,
         Field,
+        EnumMember,
         Property,
         Method
     }

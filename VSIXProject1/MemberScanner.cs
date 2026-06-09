@@ -23,15 +23,16 @@ namespace VSIXProject1
             var root = tree.GetCompilationUnitRoot();
 
             var token = root.FindToken(Math.Max(0, Math.Min(caretOffset, sourceText.Length)));
-            var currentClass = token.Parent?
+            var currentType = token.Parent?
                 .AncestorsAndSelf()
-                .OfType<ClassDeclarationSyntax>()
+                .OfType<BaseTypeDeclarationSyntax>()
+                .Where(IsSupportedType)
                 .FirstOrDefault();
 
-            if (currentClass == null)
+            if (currentType == null)
                 return Array.Empty<MemberItem>();
 
-            return GetMembersForClass(currentClass, parsedText, sourceFilePath);
+            return GetMembersForType(currentType, parsedText, sourceFilePath);
         }
 
         public static string? GetClassNameAtCaret(string sourceText, int caretOffset)
@@ -42,7 +43,8 @@ namespace VSIXProject1
 
             return token.Parent?
                 .AncestorsAndSelf()
-                .OfType<ClassDeclarationSyntax>()
+                .OfType<BaseTypeDeclarationSyntax>()
+                .Where(IsSupportedType)
                 .FirstOrDefault()
                 ?.Identifier.ValueText;
         }
@@ -52,12 +54,13 @@ namespace VSIXProject1
             var tree = CSharpSyntaxTree.ParseText(sourceText);
             var root = tree.GetCompilationUnitRoot();
             var token = root.FindToken(Math.Max(0, Math.Min(caretOffset, sourceText.Length)));
-            var currentClass = token.Parent?
+            var currentType = token.Parent?
                 .AncestorsAndSelf()
-                .OfType<ClassDeclarationSyntax>()
+                .OfType<BaseTypeDeclarationSyntax>()
+                .Where(IsSupportedType)
                 .FirstOrDefault();
 
-            return currentClass == null ? null : GetClassDisplayName(currentClass);
+            return currentType == null ? null : GetTypeDisplayName(currentType);
         }
 
         public static IReadOnlyList<MemberItem> GetMembersForClassNameOrFirst(
@@ -69,14 +72,14 @@ namespace VSIXProject1
             var parsedText = tree.GetText();
             var root = tree.GetCompilationUnitRoot();
 
-            var classes = root.DescendantNodes().OfType<ClassDeclarationSyntax>();
-            var currentClass = classes.FirstOrDefault(c =>
-                    string.Equals(c.Identifier.ValueText, preferredClassName, StringComparison.Ordinal))
-                ?? classes.FirstOrDefault();
+            var types = GetSupportedTypeDeclarations(root);
+            var currentType = types.FirstOrDefault(t =>
+                    string.Equals(t.Identifier.ValueText, preferredClassName, StringComparison.Ordinal))
+                ?? types.FirstOrDefault();
 
-            return currentClass == null
+            return currentType == null
                 ? Array.Empty<MemberItem>()
-                : GetMembersForClass(currentClass, parsedText, sourceFilePath);
+                : GetMembersForType(currentType, parsedText, sourceFilePath);
         }
 
         public static IReadOnlyList<string> GetClassNames(string sourceText)
@@ -85,8 +88,9 @@ namespace VSIXProject1
             var root = tree.GetCompilationUnitRoot();
 
             return root.DescendantNodes()
-                .OfType<ClassDeclarationSyntax>()
-                .Select(classDeclaration => classDeclaration.Identifier.ValueText)
+                .OfType<BaseTypeDeclarationSyntax>()
+                .Where(IsSupportedType)
+                .Select(typeDeclaration => typeDeclaration.Identifier.ValueText)
                 .ToList();
         }
 
@@ -97,12 +101,12 @@ namespace VSIXProject1
             var tree = CSharpSyntaxTree.ParseText(sourceText);
             var root = tree.GetCompilationUnitRoot();
 
-            var classes = root.DescendantNodes().OfType<ClassDeclarationSyntax>();
-            var currentClass = classes.FirstOrDefault(c =>
-                    string.Equals(c.Identifier.ValueText, preferredClassName, StringComparison.Ordinal))
-                ?? classes.FirstOrDefault();
+            var types = GetSupportedTypeDeclarations(root);
+            var currentType = types.FirstOrDefault(t =>
+                    string.Equals(t.Identifier.ValueText, preferredClassName, StringComparison.Ordinal))
+                ?? types.FirstOrDefault();
 
-            return currentClass == null ? null : GetClassDisplayName(currentClass);
+            return currentType == null ? null : GetTypeDisplayName(currentType);
         }
 
         public static bool ClassInheritsWindowsFormOrUserControl(
@@ -125,14 +129,24 @@ namespace VSIXProject1
             }) == true;
         }
 
-        private static IReadOnlyList<MemberItem> GetMembersForClass(
-            ClassDeclarationSyntax currentClass,
+        private static IReadOnlyList<MemberItem> GetMembersForType(
+            BaseTypeDeclarationSyntax currentType,
             SourceText parsedText,
             string? sourceFilePath)
         {
-            var classDisplayName = GetClassDisplayName(currentClass);
+            if (currentType is EnumDeclarationSyntax currentEnum)
+            {
+                return GetMembersForEnum(currentEnum, parsedText, sourceFilePath);
+            }
 
-            var fields = currentClass.Members
+            if (!(currentType is TypeDeclarationSyntax currentTypeDeclaration))
+            {
+                return Array.Empty<MemberItem>();
+            }
+
+            var classDisplayName = GetTypeDisplayName(currentType);
+
+            var fields = currentTypeDeclaration.Members
                 .OfType<FieldDeclarationSyntax>()
                 .SelectMany(f => f.Declaration.Variables.Select(v =>
                 {
@@ -157,7 +171,7 @@ namespace VSIXProject1
                 }))
                 .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
 
-            var properties = currentClass.Members
+            var properties = currentTypeDeclaration.Members
                 .OfType<PropertyDeclarationSyntax>()
                 .Select(p =>
                 {
@@ -180,7 +194,7 @@ namespace VSIXProject1
                 })
                 .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
 
-            var methods = currentClass.Members
+            var methods = currentTypeDeclaration.Members
                 .OfType<MethodDeclarationSyntax>()
                 .Where(m => !m.Identifier.ValueText.StartsWith("get_", StringComparison.Ordinal))
                 .Select(m =>
@@ -204,7 +218,7 @@ namespace VSIXProject1
                 })
                 .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
 
-            var constructors = currentClass.Members
+            var constructors = currentTypeDeclaration.Members
                 .OfType<ConstructorDeclarationSyntax>()
                 .Select(c =>
                 {
@@ -227,17 +241,50 @@ namespace VSIXProject1
                 })
                 .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
 
-            var primaryConstructor = currentClass.ParameterList == null
-                ? Enumerable.Empty<MemberItem>()
-                : new[]
+            var primaryConstructor = currentTypeDeclaration is ClassDeclarationSyntax primaryConstructorClass &&
+                primaryConstructorClass.ParameterList != null
+                ? new[]
                 {
-                    CreatePrimaryConstructorMemberItem(currentClass, parsedText, sourceFilePath)
-                };
+                    CreatePrimaryConstructorMemberItem(primaryConstructorClass, parsedText, sourceFilePath)
+                }
+                : Enumerable.Empty<MemberItem>();
 
             return fields
                 .Concat(properties)
                 .Concat(primaryConstructor.Concat(constructors).OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
                 .Concat(methods)
+                .ToList();
+        }
+
+        private static IReadOnlyList<MemberItem> GetMembersForEnum(
+            EnumDeclarationSyntax currentEnum,
+            SourceText parsedText,
+            string? sourceFilePath)
+        {
+            var classDisplayName = GetTypeDisplayName(currentEnum);
+
+            return currentEnum.Members
+                .Select(member =>
+                {
+                    var span = parsedText.Lines.GetLinePositionSpan(member.Identifier.Span);
+                    return new MemberItem
+                    {
+                        Name = member.Identifier.ValueText,
+                        DeclaringClassName = classDisplayName,
+                        DisplayText = member.EqualsValue == null
+                            ? member.Identifier.ValueText
+                            : $"{member.Identifier.ValueText} = {member.EqualsValue.Value}",
+                        Kind = MemberKind.EnumMember,
+                        StartOffset = member.SpanStart,
+                        NameStartOffset = member.Identifier.SpanStart,
+                        NameLength = member.Identifier.Span.Length,
+                        NameStartLine = span.Start.Line,
+                        NameStartColumn = span.Start.Character,
+                        NameEndLine = span.End.Line,
+                        NameEndColumn = span.End.Character,
+                        SourceFilePath = sourceFilePath
+                    };
+                })
                 .ToList();
         }
 
@@ -247,7 +294,7 @@ namespace VSIXProject1
             string? sourceFilePath)
         {
             var span = parsedText.Lines.GetLinePositionSpan(currentClass.Identifier.Span);
-            var classDisplayName = GetClassDisplayName(currentClass);
+            var classDisplayName = GetTypeDisplayName(currentClass);
             return new MemberItem
             {
                 Name = currentClass.Identifier.ValueText,
@@ -265,14 +312,48 @@ namespace VSIXProject1
             };
         }
 
-        private static string GetClassDisplayName(ClassDeclarationSyntax classDeclaration)
+        private static IEnumerable<BaseTypeDeclarationSyntax> GetSupportedTypeDeclarations(CompilationUnitSyntax root)
         {
-            if (classDeclaration.TypeParameterList == null)
+            return root.DescendantNodes()
+                .OfType<BaseTypeDeclarationSyntax>()
+                .Where(IsSupportedType);
+        }
+
+        private static bool IsSupportedType(BaseTypeDeclarationSyntax typeDeclaration)
+        {
+            return typeDeclaration is ClassDeclarationSyntax ||
+                typeDeclaration is StructDeclarationSyntax ||
+                typeDeclaration is EnumDeclarationSyntax;
+        }
+
+        private static string GetTypeDisplayName(BaseTypeDeclarationSyntax typeDeclaration)
+        {
+            if (typeDeclaration is EnumDeclarationSyntax)
             {
-                return classDeclaration.Identifier.ValueText;
+                return $"enum {typeDeclaration.Identifier.ValueText}";
             }
 
-            return $"{classDeclaration.Identifier.ValueText}{classDeclaration.TypeParameterList}";
+            var typedDeclaration = (TypeDeclarationSyntax)typeDeclaration;
+            var typeName = typedDeclaration.TypeParameterList == null
+                ? typeDeclaration.Identifier.ValueText
+                : $"{typeDeclaration.Identifier.ValueText}{typedDeclaration.TypeParameterList}";
+
+            if (typeDeclaration is StructDeclarationSyntax)
+            {
+                return $"struct {typeName}";
+            }
+
+            if (typeDeclaration.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.StaticKeyword)))
+            {
+                return $"static {typeName}";
+            }
+
+            if (typeDeclaration.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.AbstractKeyword)))
+            {
+                return $"abstract {typeName}";
+            }
+
+            return typeName;
         }
 
         private static string GetParameterDisplayText(ParameterListSyntax parameterList)

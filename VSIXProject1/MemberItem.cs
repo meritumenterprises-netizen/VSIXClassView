@@ -26,6 +26,7 @@ namespace VSIXProject1
         {
             MemberKind.Const => "Const",
             MemberKind.Field => "Fields",
+            MemberKind.EnumMember => "Members",
             MemberKind.Property => "Properties",
             MemberKind.Method => "Methods",
             _ => Kind.ToString()
