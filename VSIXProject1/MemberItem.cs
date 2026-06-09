@@ -24,6 +24,7 @@ namespace VSIXProject1
 
         public string GroupHeading => Kind switch
         {
+            MemberKind.Const => "Const",
             MemberKind.Field => "Fields",
             MemberKind.Property => "Properties",
             MemberKind.Method => "Methods",

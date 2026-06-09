@@ -8,6 +8,7 @@ namespace VSIXProject1
 {
     public enum MemberKind
     {
+        Const,
         Field,
         Property,
         Method

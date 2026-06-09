@@ -48,6 +48,11 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
         ApplyFilter();
     }
 
+    public void SetSelectedClassName(string? className)
+    {
+        SelectedClassName = string.IsNullOrEmpty(className) ? NoClassSelectedText : className!;
+    }
+
     private void MembersFilterTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         ApplyFilter();

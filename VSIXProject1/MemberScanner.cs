@@ -47,6 +47,19 @@ namespace VSIXProject1
                 ?.Identifier.ValueText;
         }
 
+        public static string? GetClassDisplayNameAtCaret(string sourceText, int caretOffset)
+        {
+            var tree = CSharpSyntaxTree.ParseText(sourceText);
+            var root = tree.GetCompilationUnitRoot();
+            var token = root.FindToken(Math.Max(0, Math.Min(caretOffset, sourceText.Length)));
+            var currentClass = token.Parent?
+                .AncestorsAndSelf()
+                .OfType<ClassDeclarationSyntax>()
+                .FirstOrDefault();
+
+            return currentClass == null ? null : GetClassDisplayName(currentClass);
+        }
+
         public static IReadOnlyList<MemberItem> GetMembersForClassNameOrFirst(
             string sourceText,
             string? preferredClassName,
@@ -77,11 +90,28 @@ namespace VSIXProject1
                 .ToList();
         }
 
+        public static string? GetClassDisplayNameForClassNameOrFirst(
+            string sourceText,
+            string? preferredClassName)
+        {
+            var tree = CSharpSyntaxTree.ParseText(sourceText);
+            var root = tree.GetCompilationUnitRoot();
+
+            var classes = root.DescendantNodes().OfType<ClassDeclarationSyntax>();
+            var currentClass = classes.FirstOrDefault(c =>
+                    string.Equals(c.Identifier.ValueText, preferredClassName, StringComparison.Ordinal))
+                ?? classes.FirstOrDefault();
+
+            return currentClass == null ? null : GetClassDisplayName(currentClass);
+        }
+
         private static IReadOnlyList<MemberItem> GetMembersForClass(
             ClassDeclarationSyntax currentClass,
             SourceText parsedText,
             string? sourceFilePath)
         {
+            var classDisplayName = GetClassDisplayName(currentClass);
+
             var fields = currentClass.Members
                 .OfType<FieldDeclarationSyntax>()
                 .SelectMany(f => f.Declaration.Variables.Select(v =>
@@ -90,9 +120,11 @@ namespace VSIXProject1
                     return new MemberItem
                     {
                         Name = v.Identifier.ValueText,
-                        DeclaringClassName = currentClass.Identifier.ValueText,
-                        DisplayText = $"{v.Identifier.ValueText} : {GetShortTypeName(f.Declaration.Type)}",
-                        Kind = MemberKind.Field,
+                        DeclaringClassName = classDisplayName,
+                        DisplayText = FieldIsConst(f)
+                            ? $"{v.Identifier.ValueText} : {GetShortTypeName(f.Declaration.Type)} = {v.Initializer?.Value}"
+                            : $"{v.Identifier.ValueText} : {GetShortTypeName(f.Declaration.Type)}",
+                        Kind = FieldIsConst(f) ? MemberKind.Const : MemberKind.Field,
                         StartOffset = f.SpanStart,
                         NameStartOffset = v.Identifier.SpanStart,
                         NameLength = v.Identifier.Span.Length,
@@ -113,7 +145,7 @@ namespace VSIXProject1
                     return new MemberItem
                     {
                         Name = p.Identifier.ValueText,
-                        DeclaringClassName = currentClass.Identifier.ValueText,
+                        DeclaringClassName = classDisplayName,
                         DisplayText = $"{p.Identifier.ValueText} : {GetShortTypeName(p.Type)} {GetPropertyAccessorDisplayText(p)}".TrimEnd(),
                         Kind = MemberKind.Property,
                         StartOffset = p.SpanStart,
@@ -137,8 +169,8 @@ namespace VSIXProject1
                     return new MemberItem
                     {
                         Name = m.Identifier.ValueText,
-                        DeclaringClassName = currentClass.Identifier.ValueText,
-                        DisplayText = $"{GetShortTypeName(m.ReturnType)} : {m.Identifier.ValueText} ({GetParameterDisplayText(m.ParameterList)})",
+                        DeclaringClassName = classDisplayName,
+                        DisplayText = $"{GetShortTypeName(m.ReturnType)} : {GetMethodDisplayName(m)} ({GetParameterDisplayText(m.ParameterList)})",
                         Kind = MemberKind.Method,
                         StartOffset = m.SpanStart,
                         NameStartOffset = m.Identifier.SpanStart,
@@ -160,7 +192,7 @@ namespace VSIXProject1
                     return new MemberItem
                     {
                         Name = c.Identifier.ValueText,
-                        DeclaringClassName = currentClass.Identifier.ValueText,
+                        DeclaringClassName = classDisplayName,
                         DisplayText = $"ctor {c.Identifier.ValueText} ({GetParameterDisplayText(c.ParameterList)})",
                         Kind = MemberKind.Method,
                         StartOffset = c.SpanStart,
@@ -195,10 +227,11 @@ namespace VSIXProject1
             string? sourceFilePath)
         {
             var span = parsedText.Lines.GetLinePositionSpan(currentClass.Identifier.Span);
+            var classDisplayName = GetClassDisplayName(currentClass);
             return new MemberItem
             {
                 Name = currentClass.Identifier.ValueText,
-                DeclaringClassName = currentClass.Identifier.ValueText,
+                DeclaringClassName = classDisplayName,
                 DisplayText = $"ctor {currentClass.Identifier.ValueText} ({GetParameterDisplayText(currentClass.ParameterList!)})",
                 Kind = MemberKind.Method,
                 StartOffset = currentClass.SpanStart,
@@ -212,12 +245,37 @@ namespace VSIXProject1
             };
         }
 
+        private static string GetClassDisplayName(ClassDeclarationSyntax classDeclaration)
+        {
+            if (classDeclaration.TypeParameterList == null)
+            {
+                return classDeclaration.Identifier.ValueText;
+            }
+
+            return $"{classDeclaration.Identifier.ValueText}{classDeclaration.TypeParameterList}";
+        }
+
         private static string GetParameterDisplayText(ParameterListSyntax parameterList)
         {
             return string.Join(
                 ", ",
                 parameterList.Parameters.Select(parameter =>
                     $"{parameter.Identifier.ValueText}: {GetShortTypeName(parameter.Type)}"));
+        }
+
+        private static string GetMethodDisplayName(MethodDeclarationSyntax method)
+        {
+            if (method.TypeParameterList == null)
+            {
+                return method.Identifier.ValueText;
+            }
+
+            return $"{method.Identifier.ValueText}{method.TypeParameterList}";
+        }
+
+        private static bool FieldIsConst(FieldDeclarationSyntax field)
+        {
+            return field.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.ConstKeyword));
         }
 
         private static string GetPropertyAccessorDisplayText(PropertyDeclarationSyntax property)

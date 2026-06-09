@@ -142,7 +142,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         var text = editPoint.GetText(textDoc.EndPoint);
         var caretOffset = GetCaretOffset(textDoc);
 
-        var classNameAtCaret = MemberScanner.GetClassNameAtCaret(text, caretOffset);
+        var classNameAtCaret = MemberScanner.GetClassDisplayNameAtCaret(text, caretOffset);
         if (!force && IsCurrentlyLoaded(doc.FullName, classNameAtCaret))
         {
             return;
@@ -171,14 +171,15 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
 
         var sourceText = File.ReadAllText(selection.Value.FilePath);
         var preferredClassName = selection.Value.ClassName ?? Path.GetFileNameWithoutExtension(selection.Value.FilePath);
-        if (IsCurrentlyLoaded(selection.Value.FilePath, preferredClassName))
+        var classDisplayName = MemberScanner.GetClassDisplayNameForClassNameOrFirst(sourceText, preferredClassName);
+        if (IsCurrentlyLoaded(selection.Value.FilePath, classDisplayName))
         {
             return true;
         }
 
         var members = MemberScanner.GetMembersForClassNameOrFirst(sourceText, preferredClassName, selection.Value.FilePath);
         _control.SetMembers(members);
-        SetLoadedSource(members, selection.Value.FilePath, preferredClassName);
+        SetLoadedSource(members, selection.Value.FilePath, classDisplayName);
         _lastSolutionExplorerRefreshUtc = DateTime.UtcNow;
 
         return true;
@@ -208,14 +209,15 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
 
         var sourceText = File.ReadAllText(designerSourceFilePath);
         var preferredClassName = Path.GetFileNameWithoutExtension(designerSourceFilePath);
-        if (IsCurrentlyLoaded(designerSourceFilePath, preferredClassName))
+        var classDisplayName = MemberScanner.GetClassDisplayNameForClassNameOrFirst(sourceText, preferredClassName);
+        if (IsCurrentlyLoaded(designerSourceFilePath, classDisplayName))
         {
             return true;
         }
 
         var members = MemberScanner.GetMembersForClassNameOrFirst(sourceText, preferredClassName, designerSourceFilePath);
         _control.SetMembers(members);
-        SetLoadedSource(members, designerSourceFilePath, preferredClassName);
+        SetLoadedSource(members, designerSourceFilePath, classDisplayName);
 
         return true;
     }
@@ -248,6 +250,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     {
         _loadedSourceFilePath = sourceFilePath;
         _loadedClassName = members.FirstOrDefault()?.DeclaringClassName ?? requestedClassName;
+        _control.SetSelectedClassName(_loadedClassName);
     }
 
     private (string FilePath, string? ClassName)? GetSelectedSolutionExplorerCodeSelection()
