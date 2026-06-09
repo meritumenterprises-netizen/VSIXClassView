@@ -20,6 +20,13 @@ namespace VSIXProject1
         public required int NameEndColumn { get; init; }
         public string? SourceFilePath { get; init; }
 
-        public string DisplayText => $"{Kind}: {Name}";
+        public string DisplayText => Name;
+        public string GroupHeading => Kind switch
+        {
+            MemberKind.Field => "Fields",
+            MemberKind.Property => "Properties",
+            MemberKind.Method => "Methods",
+            _ => Kind.ToString()
+        };
     }
 }

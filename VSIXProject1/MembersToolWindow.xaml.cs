@@ -17,7 +17,7 @@ public partial class MembersToolWindowControl : UserControl
     public MembersToolWindowControl()
     {
         InitializeComponent();
-        MembersList.ItemsSource = Members;
+        DataContext = this;
     }
 
     public void SetMembers(IEnumerable<MemberItem> members)
@@ -38,12 +38,11 @@ public partial class MembersToolWindowControl : UserControl
         var filteredMembers = string.IsNullOrWhiteSpace(filter)
             ? _allMembers
             : _allMembers.Where(member =>
-                member.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                member.DisplayText.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0);
+                member.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0);
 
         Members.Clear();
 
-        foreach (var member in filteredMembers)
+        foreach (var member in filteredMembers.OrderBy(member => member.Kind).ThenBy(member => member.Name))
         {
             Members.Add(member);
         }
