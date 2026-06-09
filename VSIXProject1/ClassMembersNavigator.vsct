@@ -4,7 +4,20 @@
   <Extern href="vsshlids.h" />
 
   <Commands package="guidClassMembersNavigatorPackage">
+    <Menus>
+      <Menu guid="guidClassMembersNavigatorCommandSet" id="ClassMembersTopLevelMenu" priority="0x0800" type="Menu">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_MM_TOOLSADDINS" />
+        <Strings>
+          <ButtonText>Class Members</ButtonText>
+          <CommandName>Class Members</CommandName>
+        </Strings>
+      </Menu>
+    </Menus>
+
     <Groups>
+      <Group guid="guidClassMembersNavigatorCommandSet" id="ClassMembersTopLevelMenuGroup" priority="0x0100">
+        <Parent guid="guidClassMembersNavigatorCommandSet" id="ClassMembersTopLevelMenu" />
+      </Group>
       <Group guid="guidClassMembersNavigatorCommandSet" id="ClassMembersContextMenuGroup" priority="0x0600">
         <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN" />
       </Group>
@@ -17,13 +30,16 @@
       <Button guid="guidClassMembersNavigatorCommandSet" id="ShowClassMembersCommand" priority="0x0100" type="Button">
         <Parent guid="guidClassMembersNavigatorCommandSet" id="ClassMembersContextMenuGroup" />
         <Strings>
-          <ButtonText>Show class members</ButtonText>
+          <ButtonText>Show Class Members</ButtonText>
         </Strings>
       </Button>
     </Buttons>
   </Commands>
 
   <CommandPlacements>
+    <CommandPlacement guid="guidClassMembersNavigatorCommandSet" id="ShowClassMembersCommand" priority="0x0100">
+      <Parent guid="guidClassMembersNavigatorCommandSet" id="ClassMembersTopLevelMenuGroup" />
+    </CommandPlacement>
     <CommandPlacement guid="guidClassMembersNavigatorCommandSet" id="ShowClassMembersCommand" priority="0x0100">
       <Parent guid="guidClassMembersNavigatorCommandSet" id="ClassMembersEditorAllContextMenuGroup" />
     </CommandPlacement>
@@ -34,6 +50,8 @@
 
     <GuidSymbol name="guidClassMembersNavigatorCommandSet" value="{8F853D22-4D25-4F1F-94F9-203FE28EF8CF}">
       <IDSymbol name="ShowClassMembersCommand" value="0x0100" />
+      <IDSymbol name="ClassMembersTopLevelMenu" value="0x1010" />
+      <IDSymbol name="ClassMembersTopLevelMenuGroup" value="0x1011" />
       <IDSymbol name="ClassMembersContextMenuGroup" value="0x1020" />
       <IDSymbol name="ClassMembersEditorAllContextMenuGroup" value="0x1021" />
     </GuidSymbol>

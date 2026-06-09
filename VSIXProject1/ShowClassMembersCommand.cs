@@ -45,7 +45,7 @@ internal sealed class ShowClassMembersCommand
         ThreadHelper.ThrowIfNotOnUIThread();
 
         _command.Visible = true;
-        _command.Enabled = IsCSharpTextDocumentActive();
+        _command.Enabled = true;
     }
 
     private void Execute(object sender, EventArgs e)
@@ -54,15 +54,5 @@ internal sealed class ShowClassMembersCommand
         _package.JoinableTaskFactory
             .RunAsync(_package.ShowMembersToolWindowAsync)
             .FileAndForget("VSIXProject1/ShowClassMembers");
-    }
-
-    private bool IsCSharpTextDocumentActive()
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        var doc = _dte?.ActiveDocument;
-        return doc != null
-            && doc.FullName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
-            && doc.Object("TextDocument") is TextDocument;
     }
 }
