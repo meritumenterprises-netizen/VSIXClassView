@@ -18,6 +18,7 @@ namespace VSIXProject1
         public required int NameStartColumn { get; init; }
         public required int NameEndLine { get; init; }
         public required int NameEndColumn { get; init; }
+        public string? SourceFilePath { get; init; }
 
         public string DisplayText => $"{Kind}: {Name}";
     }

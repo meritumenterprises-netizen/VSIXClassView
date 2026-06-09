@@ -9,12 +9,14 @@ namespace VSIXProject1
     using Microsoft.CodeAnalysis;
     using Microsoft.CodeAnalysis.CSharp;
     using Microsoft.CodeAnalysis.CSharp.Syntax;
+    using Microsoft.CodeAnalysis.Text;
 
     public static class MemberScanner
     {
         public static IReadOnlyList<MemberItem> GetMembersForClassAtCaret(
             string sourceText,
-            int caretOffset)
+            int caretOffset,
+            string? sourceFilePath = null)
         {
             var tree = CSharpSyntaxTree.ParseText(sourceText);
             var parsedText = tree.GetText();
@@ -29,6 +31,33 @@ namespace VSIXProject1
             if (currentClass == null)
                 return Array.Empty<MemberItem>();
 
+            return GetMembersForClass(currentClass, parsedText, sourceFilePath);
+        }
+
+        public static IReadOnlyList<MemberItem> GetMembersForClassNameOrFirst(
+            string sourceText,
+            string? preferredClassName,
+            string? sourceFilePath = null)
+        {
+            var tree = CSharpSyntaxTree.ParseText(sourceText);
+            var parsedText = tree.GetText();
+            var root = tree.GetCompilationUnitRoot();
+
+            var classes = root.DescendantNodes().OfType<ClassDeclarationSyntax>();
+            var currentClass = classes.FirstOrDefault(c =>
+                    string.Equals(c.Identifier.ValueText, preferredClassName, StringComparison.Ordinal))
+                ?? classes.FirstOrDefault();
+
+            return currentClass == null
+                ? Array.Empty<MemberItem>()
+                : GetMembersForClass(currentClass, parsedText, sourceFilePath);
+        }
+
+        private static IReadOnlyList<MemberItem> GetMembersForClass(
+            ClassDeclarationSyntax currentClass,
+            SourceText parsedText,
+            string? sourceFilePath)
+        {
             var fields = currentClass.Members
                 .OfType<FieldDeclarationSyntax>()
                 .SelectMany(f => f.Declaration.Variables.Select(v =>
@@ -44,7 +73,8 @@ namespace VSIXProject1
                         NameStartLine = span.Start.Line,
                         NameStartColumn = span.Start.Character,
                         NameEndLine = span.End.Line,
-                        NameEndColumn = span.End.Character
+                        NameEndColumn = span.End.Character,
+                        SourceFilePath = sourceFilePath
                     };
                 }))
                 .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
@@ -64,7 +94,8 @@ namespace VSIXProject1
                         NameStartLine = span.Start.Line,
                         NameStartColumn = span.Start.Character,
                         NameEndLine = span.End.Line,
-                        NameEndColumn = span.End.Character
+                        NameEndColumn = span.End.Character,
+                        SourceFilePath = sourceFilePath
                     };
                 })
                 .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
@@ -85,7 +116,8 @@ namespace VSIXProject1
                         NameStartLine = span.Start.Line,
                         NameStartColumn = span.Start.Character,
                         NameEndLine = span.End.Line,
-                        NameEndColumn = span.End.Character
+                        NameEndColumn = span.End.Character,
+                        SourceFilePath = sourceFilePath
                     };
                 })
                 .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
