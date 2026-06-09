@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable">
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+
+  <Commands package="guidClassMembersNavigatorPackage">
+    <Groups>
+      <Group guid="guidClassMembersNavigatorCommandSet" id="ClassMembersContextMenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN" />
+      </Group>
+      <Group guid="guidClassMembersNavigatorCommandSet" id="ClassMembersEditorAllContextMenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_EDITOR_ALL" />
+      </Group>
+    </Groups>
+
+    <Buttons>
+      <Button guid="guidClassMembersNavigatorCommandSet" id="ShowClassMembersCommand" priority="0x0100" type="Button">
+        <Parent guid="guidClassMembersNavigatorCommandSet" id="ClassMembersContextMenuGroup" />
+        <Strings>
+          <ButtonText>Show class members</ButtonText>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+
+  <CommandPlacements>
+    <CommandPlacement guid="guidClassMembersNavigatorCommandSet" id="ShowClassMembersCommand" priority="0x0100">
+      <Parent guid="guidClassMembersNavigatorCommandSet" id="ClassMembersEditorAllContextMenuGroup" />
+    </CommandPlacement>
+  </CommandPlacements>
+
+  <Symbols>
+    <GuidSymbol name="guidClassMembersNavigatorPackage" value="{1CB85797-9814-4F4A-B7D6-4A4E4DD06B45}" />
+
+    <GuidSymbol name="guidClassMembersNavigatorCommandSet" value="{8F853D22-4D25-4F1F-94F9-203FE28EF8CF}">
+      <IDSymbol name="ShowClassMembersCommand" value="0x0100" />
+      <IDSymbol name="ClassMembersContextMenuGroup" value="0x1020" />
+      <IDSymbol name="ClassMembersEditorAllContextMenuGroup" value="0x1021" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>

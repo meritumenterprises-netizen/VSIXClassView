@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="VSIXProject1/VSIXProject1.csproj">
+    <Deploy />
+  </Project>
+</Solution>
