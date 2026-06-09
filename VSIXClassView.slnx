@@ -1,5 +1,5 @@
 <Solution>
-  <Project Path="VSIXProject1/VSIXProject1.csproj">
+  <Project Path="VSIXProject1/VSIXClassView.csproj">
     <Deploy />
   </Project>
 </Solution>
