@@ -1,18 +1,36 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using VSIXProject1;
 
-public partial class MembersToolWindowControl : UserControl
+public partial class MembersToolWindowControl : UserControl, INotifyPropertyChanged
 {
     private readonly List<MemberItem> _allMembers = new();
+    private string _selectedClassName = string.Empty;
 
     public ObservableCollection<MemberItem> Members { get; } = new();
+    public string SelectedClassName
+    {
+        get => _selectedClassName;
+        private set
+        {
+            if (_selectedClassName == value)
+            {
+                return;
+            }
+
+            _selectedClassName = value;
+            OnPropertyChanged();
+        }
+    }
 
     public event Action<MemberItem>? MemberDoubleClicked;
+    public event PropertyChangedEventHandler? PropertyChanged;
 
     public MembersToolWindowControl()
     {
@@ -24,6 +42,7 @@ public partial class MembersToolWindowControl : UserControl
     {
         _allMembers.Clear();
         _allMembers.AddRange(members);
+        SelectedClassName = _allMembers.FirstOrDefault()?.DeclaringClassName ?? string.Empty;
         ApplyFilter();
     }
 
@@ -55,5 +74,10 @@ public partial class MembersToolWindowControl : UserControl
         {
             MemberDoubleClicked?.Invoke(item);
         }
+    }
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 }

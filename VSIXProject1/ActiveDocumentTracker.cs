@@ -59,6 +59,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
+        if (ActiveWindowIsDesigner())
+        {
+            return;
+        }
+
         try
         {
             RefreshFromDocument(_dte?.ActiveDocument);
@@ -92,6 +97,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
 
         try
         {
+            if (ActiveWindowIsDesigner())
+            {
+                return;
+            }
+
             if (TryRefreshFromSolutionExplorerSelection())
             {
                 return;
@@ -108,6 +118,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     private void RefreshFromDocument(Document? doc, bool force = false)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (!force && ActiveWindowIsDesigner())
+        {
+            return;
+        }
 
         if (doc == null || !doc.FullName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
         {
@@ -327,6 +342,25 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             Extend: true);
     }
 
+    private bool ActiveWindowIsDesigner()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var activeWindow = _dte?.ActiveWindow;
+        if (activeWindow == null || activeWindow.Type != vsWindowType.vsWindowTypeDocument)
+        {
+            return false;
+        }
+
+        var kind = activeWindow.Kind ?? string.Empty;
+        var caption = activeWindow.Caption ?? string.Empty;
+
+        return kind.IndexOf("Designer", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            caption.EndsWith(" [Design]", StringComparison.OrdinalIgnoreCase) ||
+            caption.EndsWith(" (Design)", StringComparison.OrdinalIgnoreCase) ||
+            caption.IndexOf("Designer", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
     public int OnAfterAttributeChange(uint docCookie, uint grfAttribs)
     {
         return VSConstants.S_OK;
@@ -376,6 +410,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             {
                 await System.Threading.Tasks.Task.Delay(100);
                 await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
+                if (!force && ActiveWindowIsDesigner())
+                {
+                    return;
+                }
+
                 if (force)
                 {
                     try

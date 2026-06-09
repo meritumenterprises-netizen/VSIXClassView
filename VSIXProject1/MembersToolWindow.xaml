@@ -12,16 +12,32 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
+        <Grid Margin="4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="48" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Text="Class: "
+                       VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1"
+                       Text="{Binding SelectedClassName}"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center" />
+        </Grid>
+
         <TextBox x:Name="MembersFilterTextBox"
+                 Grid.Row="1"
                  Width="Auto"
                  Margin="4"
                  TextChanged="MembersFilterTextBox_TextChanged" />
 
         <ListBox x:Name="MembersList"
-                 Grid.Row="1"
+                 Grid.Row="2"
                  ItemsSource="{Binding Source={StaticResource GroupedMembers}}"
                  DisplayMemberPath="DisplayText"
                  MouseDoubleClick="MembersList_MouseDoubleClick">
