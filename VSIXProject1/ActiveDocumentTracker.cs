@@ -78,12 +78,12 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
 
         try
         {
-            if (TryRefreshFromSolutionExplorerSelection())
+            if (ActiveWindowIsSolutionExplorer())
             {
                 return;
             }
 
-            if (SolutionExplorerSelectionOwnsMembersToolWindow())
+            if (TryRefreshFromActiveDesigner())
             {
                 return;
             }
@@ -106,12 +106,12 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
 
         try
         {
-            if (TryRefreshFromSolutionExplorerSelection())
+            if (ActiveWindowIsSolutionExplorer())
             {
                 return;
             }
 
-            if (SolutionExplorerSelectionOwnsMembersToolWindow())
+            if (TryRefreshFromActiveDesigner())
             {
                 return;
             }
@@ -120,11 +120,6 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             if (currentOpenTextEditorDocument != null)
             {
                 RefreshFromDocument(currentOpenTextEditorDocument, force: true);
-                return;
-            }
-
-            if (TryRefreshFromActiveDesigner())
-            {
                 return;
             }
 
@@ -184,12 +179,12 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
 
         try
         {
-            if (TryRefreshFromSolutionExplorerSelection())
+            if (ActiveWindowIsSolutionExplorer())
             {
                 return;
             }
 
-            if (SolutionExplorerSelectionOwnsMembersToolWindow())
+            if (TryRefreshFromActiveDesigner())
             {
                 return;
             }
@@ -198,12 +193,6 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             if (currentOpenTextEditorDocument != null)
             {
                 RefreshFromDocument(currentOpenTextEditorDocument, force: true);
-                return;
-            }
-
-            if (ActiveWindowIsDesigner())
-            {
-                TryRefreshFromActiveDesigner();
                 return;
             }
 
@@ -233,11 +222,6 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         }
 
         RememberCurrentOpenTextEditorDocument(doc);
-
-        if (SolutionExplorerSelectionOwnsMembersToolWindowFor(doc.FullName))
-        {
-            return;
-        }
 
         if (EditorRefreshIsSuppressedFor(doc.FullName))
         {
@@ -812,6 +796,13 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             caption.IndexOf("Designer", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
+    private bool ActiveWindowIsSolutionExplorer()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        return _dte?.ActiveWindow?.Type == vsWindowType.vsWindowTypeSolutionExplorer;
+    }
+
     private Document? GetCurrentOpenCSharpTextEditorDocument()
     {
         ThreadHelper.ThrowIfNotOnUIThread();
@@ -948,12 +939,8 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             {
                 await System.Threading.Tasks.Task.Delay(100);
                 await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
-                if (TryRefreshFromSolutionExplorerSelection())
-                {
-                    return;
-                }
 
-                if (SolutionExplorerSelectionOwnsMembersToolWindow())
+                if (TryRefreshFromActiveDesigner())
                 {
                     return;
                 }
@@ -962,11 +949,6 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                 if (currentOpenTextEditorDocument != null)
                 {
                     RefreshFromDocument(currentOpenTextEditorDocument, force: true);
-                    return;
-                }
-
-                if (!force && TryRefreshFromActiveDesigner())
-                {
                     return;
                 }
 
@@ -996,12 +978,8 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             {
                 await System.Threading.Tasks.Task.Delay(100);
                 await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
-                if (TryRefreshFromSolutionExplorerSelection())
-                {
-                    return;
-                }
 
-                if (SolutionExplorerSelectionOwnsMembersToolWindow())
+                if (TryRefreshFromActiveDesigner())
                 {
                     return;
                 }
@@ -1010,11 +988,6 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                 if (currentOpenTextEditorDocument != null)
                 {
                     RefreshFromDocument(currentOpenTextEditorDocument, force: true);
-                    return;
-                }
-
-                if (!force && TryRefreshFromActiveDesigner())
-                {
                     return;
                 }
 
@@ -1037,11 +1010,6 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             {
                 await System.Threading.Tasks.Task.Delay(100);
                 await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-                if (SolutionExplorerSelectionOwnsMembersToolWindow())
-                {
-                    return;
-                }
 
                 if (TryRefreshFromActiveDesigner())
                 {
