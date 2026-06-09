@@ -44,13 +44,27 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
     {
         _allMembers.Clear();
         _allMembers.AddRange(members);
-        SelectedClassName = _allMembers.FirstOrDefault()?.DeclaringClassName ?? NoClassSelectedText;
+        var selectedClassName = _allMembers.FirstOrDefault()?.DeclaringClassName ?? NoClassSelectedText;
+        var selectedClassChanged = !string.Equals(SelectedClassName, selectedClassName, StringComparison.Ordinal);
+
+        SelectedClassName = selectedClassName;
+        if (selectedClassChanged)
+        {
+            MembersFilterTextBox.Text = string.Empty;
+        }
+
         ApplyFilter();
     }
 
     public void SetSelectedClassName(string? className)
     {
-        SelectedClassName = string.IsNullOrEmpty(className) ? NoClassSelectedText : className!;
+        var selectedClassName = string.IsNullOrEmpty(className) ? NoClassSelectedText : className!;
+        if (!string.Equals(SelectedClassName, selectedClassName, StringComparison.Ordinal))
+        {
+            SelectedClassName = selectedClassName;
+            MembersFilterTextBox.Text = string.Empty;
+            ApplyFilter();
+        }
     }
 
     private void MembersFilterTextBox_TextChanged(object sender, TextChangedEventArgs e)
