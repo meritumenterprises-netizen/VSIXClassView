@@ -26,7 +26,7 @@ internal sealed class ShowClassMembersCommand
         commandService.AddCommand(_command);
     }
 
-    public static async Task InitializeAsync(
+    public static async Task<ShowClassMembersCommand?> InitializeAsync(
         ClassMembersNavigatorPackage package,
         CancellationToken cancellationToken)
     {
@@ -36,8 +36,10 @@ internal sealed class ShowClassMembersCommand
         var dte = await package.GetServiceAsync(typeof(DTE)) as DTE2;
         if (commandService != null)
         {
-            _ = new ShowClassMembersCommand(package, commandService, dte);
+            return new ShowClassMembersCommand(package, commandService, dte);
         }
+
+        return null;
     }
 
     private void BeforeQueryStatus(object sender, EventArgs e)
@@ -45,7 +47,15 @@ internal sealed class ShowClassMembersCommand
         ThreadHelper.ThrowIfNotOnUIThread();
 
         _command.Visible = true;
-        _command.Enabled = true;
+        RefreshStatus();
+    }
+
+    public void RefreshStatus()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        _command.Visible = true;
+        _command.Enabled = !_package.JoinableTaskFactory.Run(_package.IsMembersToolWindowVisibleAsync);
     }
 
     private void Execute(object sender, EventArgs e)

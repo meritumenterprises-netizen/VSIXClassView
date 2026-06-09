@@ -105,6 +105,26 @@ namespace VSIXProject1
             return currentClass == null ? null : GetClassDisplayName(currentClass);
         }
 
+        public static bool ClassInheritsWindowsFormOrUserControl(
+            string sourceText,
+            string? preferredClassName)
+        {
+            var tree = CSharpSyntaxTree.ParseText(sourceText);
+            var root = tree.GetCompilationUnitRoot();
+
+            var classes = root.DescendantNodes().OfType<ClassDeclarationSyntax>();
+            var currentClass = classes.FirstOrDefault(c =>
+                    string.Equals(c.Identifier.ValueText, preferredClassName, StringComparison.Ordinal))
+                ?? classes.FirstOrDefault();
+
+            return currentClass?.BaseList?.Types.Any(baseType =>
+            {
+                var shortTypeName = GetShortTypeName(baseType.Type);
+                return string.Equals(shortTypeName, "Form", StringComparison.Ordinal) ||
+                    string.Equals(shortTypeName, "UserControl", StringComparison.Ordinal);
+            }) == true;
+        }
+
         private static IReadOnlyList<MemberItem> GetMembersForClass(
             ClassDeclarationSyntax currentClass,
             SourceText parsedText,

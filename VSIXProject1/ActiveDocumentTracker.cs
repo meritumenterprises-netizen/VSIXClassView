@@ -29,6 +29,8 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     private string? _loadedSourceFilePath;
     private string? _loadedClassName;
     private DateTime _lastSolutionExplorerRefreshUtc = DateTime.MinValue;
+    private DateTime _suppressEditorRefreshUntilUtc = DateTime.MinValue;
+    private bool _solutionExplorerSelectionOwnsMembersToolWindow;
 
     public ActiveDocumentTracker(
         AsyncPackage package,
@@ -81,6 +83,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                 return;
             }
 
+            if (SolutionExplorerSelectionOwnsMembersToolWindow())
+            {
+                return;
+            }
+
             var currentOpenTextEditorDocument = GetCurrentOpenCSharpTextEditorDocument();
             if (currentOpenTextEditorDocument != null)
             {
@@ -100,6 +107,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         try
         {
             if (TryRefreshFromSolutionExplorerSelection())
+            {
+                return;
+            }
+
+            if (SolutionExplorerSelectionOwnsMembersToolWindow())
             {
                 return;
             }
@@ -124,6 +136,17 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         }
     }
 
+    public void Reset()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        _currentOpenTextEditorDocument = null;
+        _suppressEditorRefreshUntilUtc = DateTime.MinValue;
+        _solutionExplorerSelectionOwnsMembersToolWindow = false;
+        ClearLoadedSource();
+        _control.SetMembers(Array.Empty<MemberItem>());
+    }
+
     private void DocumentSaved(Document document)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
@@ -145,6 +168,12 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     {
         ThreadHelper.ThrowIfNotOnUIThread();
         var focusedDocument = GetCurrentDocumentFrameDocument() ?? gotFocus.Document;
+        if (gotFocus.Type == vsWindowType.vsWindowTypeDocument &&
+            DocumentIsCSharpTextEditor(focusedDocument))
+        {
+            _solutionExplorerSelectionOwnsMembersToolWindow = false;
+        }
+
         RememberCurrentOpenTextEditorDocument(focusedDocument);
         RefreshDocumentSoon(focusedDocument, force: true);
     }
@@ -156,6 +185,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         try
         {
             if (TryRefreshFromSolutionExplorerSelection())
+            {
+                return;
+            }
+
+            if (SolutionExplorerSelectionOwnsMembersToolWindow())
             {
                 return;
             }
@@ -200,6 +234,16 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
 
         RememberCurrentOpenTextEditorDocument(doc);
 
+        if (SolutionExplorerSelectionOwnsMembersToolWindowFor(doc.FullName))
+        {
+            return;
+        }
+
+        if (EditorRefreshIsSuppressedFor(doc.FullName))
+        {
+            return;
+        }
+
         if (!force && WasJustLoadedFromSolutionExplorer(doc.FullName))
         {
             return;
@@ -217,6 +261,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
 
         var members = MemberScanner.GetMembersForClassAtCaret(text, caretOffset, doc.FullName);
 
+        _solutionExplorerSelectionOwnsMembersToolWindow = false;
         _control.SetMembers(members);
         SetLoadedSource(members, doc.FullName, classNameAtCaret);
     }
@@ -239,15 +284,24 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         var sourceText = File.ReadAllText(selection.Value.FilePath);
         var preferredClassName = selection.Value.ClassName ?? Path.GetFileNameWithoutExtension(selection.Value.FilePath);
         var classDisplayName = MemberScanner.GetClassDisplayNameForClassNameOrFirst(sourceText, preferredClassName);
+        var focusMembersToolWindow = selection.Value.FocusMembersToolWindow ||
+            MemberScanner.ClassInheritsWindowsFormOrUserControl(sourceText, preferredClassName);
+
         if (IsCurrentlyLoaded(selection.Value.FilePath, classDisplayName))
         {
+            _solutionExplorerSelectionOwnsMembersToolWindow = focusMembersToolWindow;
+            SuppressEditorRefreshForFocusHandoff(focusMembersToolWindow);
+            FocusMembersToolWindowForDesignerBackedSelection(focusMembersToolWindow);
             return true;
         }
 
         var members = MemberScanner.GetMembersForClassNameOrFirst(sourceText, preferredClassName, selection.Value.FilePath);
+        _solutionExplorerSelectionOwnsMembersToolWindow = focusMembersToolWindow;
         _control.SetMembers(members);
         SetLoadedSource(members, selection.Value.FilePath, classDisplayName);
         _lastSolutionExplorerRefreshUtc = DateTime.UtcNow;
+        SuppressEditorRefreshForFocusHandoff(focusMembersToolWindow);
+        FocusMembersToolWindowForDesignerBackedSelection(focusMembersToolWindow);
 
         return true;
     }
@@ -296,6 +350,37 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             && DateTime.UtcNow - _lastSolutionExplorerRefreshUtc < TimeSpan.FromSeconds(2);
     }
 
+    private bool EditorRefreshIsSuppressedFor(string sourceFilePath)
+    {
+        return DateTime.UtcNow < _suppressEditorRefreshUntilUtc
+            && !string.IsNullOrEmpty(_loadedSourceFilePath)
+            && !string.Equals(_loadedSourceFilePath, sourceFilePath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void SuppressEditorRefreshForFocusHandoff(bool suppress)
+    {
+        if (suppress)
+        {
+            _suppressEditorRefreshUntilUtc = DateTime.UtcNow.AddSeconds(2);
+        }
+    }
+
+    private bool SolutionExplorerSelectionOwnsMembersToolWindow()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        return _solutionExplorerSelectionOwnsMembersToolWindow;
+    }
+
+    private bool SolutionExplorerSelectionOwnsMembersToolWindowFor(string sourceFilePath)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        return _solutionExplorerSelectionOwnsMembersToolWindow
+            && !string.IsNullOrEmpty(_loadedSourceFilePath)
+            && !string.Equals(_loadedSourceFilePath, sourceFilePath, StringComparison.OrdinalIgnoreCase);
+    }
+
     private bool IsCurrentlyLoaded(string sourceFilePath, string? className)
     {
         return !string.IsNullOrEmpty(_loadedSourceFilePath)
@@ -320,7 +405,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         _control.SetSelectedClassName(_loadedClassName);
     }
 
-    private (string FilePath, string? ClassName)? GetSelectedSolutionExplorerCodeSelection()
+    private (string FilePath, string? ClassName, bool FocusMembersToolWindow)? GetSelectedSolutionExplorerCodeSelection()
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -341,14 +426,15 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             var projectItem = FindOwningProjectItem(selectedItem);
             if (projectItem != null)
             {
+                var selectedNodeIsDesignerSourceFile = IsGeneratedDesignerSourceFile(selectedItem.Name);
                 var filePath = GetProjectItemFilePath(
                     projectItem,
-                    preserveDesignerSourceFile: IsGeneratedDesignerSourceFile(selectedItem.Name));
+                    preserveDesignerSourceFile: selectedNodeIsDesignerSourceFile);
 
                 if (filePath != null)
                 {
                     var className = GetSelectedClassNameFromFile(filePath, selectedItem.Name);
-                    return (filePath, className);
+                    return (filePath, className, IsDesignerBackedSolutionExplorerSelection(selectedItem.Name, filePath, selectedNodeIsDesignerSourceFile));
                 }
             }
         }
@@ -356,7 +442,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         return null;
     }
 
-    private (string FilePath, string? ClassName)? GetSelectedSolutionExplorerFileFromShell()
+    private (string FilePath, string? ClassName, bool FocusMembersToolWindow)? GetSelectedSolutionExplorerFileFromShell()
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -401,7 +487,10 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                 return null;
             }
 
-            return (sourceFilePath, GetSelectedClassNameFromFile(sourceFilePath, Path.GetFileNameWithoutExtension(sourceFilePath)));
+            return (
+                sourceFilePath,
+                GetSelectedClassNameFromFile(sourceFilePath, Path.GetFileNameWithoutExtension(sourceFilePath)),
+                IsDesignerBackedSolutionExplorerSelection(selectedFilePath, sourceFilePath, selectedNodeIsDesignerSourceFile: false));
         }
         catch
         {
@@ -554,6 +643,55 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         }
 
         return null;
+    }
+
+    private void FocusMembersToolWindowForDesignerBackedSelection(bool focusMembersToolWindow)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (!focusMembersToolWindow)
+        {
+            return;
+        }
+
+        _package.JoinableTaskFactory
+            .RunAsync(async () =>
+            {
+                await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
+                if (_package is ClassMembersNavigatorPackage package)
+                {
+                    await package.FocusMembersToolWindowAsync();
+                }
+            })
+            .FileAndForget("VSIXProject1/FocusMembersToolWindowForDesignerBackedSelection");
+    }
+
+    private static bool IsDesignerBackedSolutionExplorerSelection(
+        string selectedPathOrName,
+        string resolvedSourceFilePath,
+        bool selectedNodeIsDesignerSourceFile)
+    {
+        if (selectedNodeIsDesignerSourceFile)
+        {
+            return false;
+        }
+
+        if (selectedPathOrName.EndsWith(".resx", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (selectedPathOrName.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return !resolvedSourceFilePath.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase);
+        }
+
+        var selectedName = Path.GetFileNameWithoutExtension(selectedPathOrName);
+        var resolvedName = Path.GetFileNameWithoutExtension(resolvedSourceFilePath);
+
+        return !string.IsNullOrEmpty(selectedName) &&
+            string.Equals(selectedName, resolvedName, StringComparison.OrdinalIgnoreCase) &&
+            selectedPathOrName.IndexOf('.', selectedName.Length) < 0;
     }
 
     private static bool IsGeneratedDesignerSourceFile(string filePath)
@@ -815,6 +953,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                     return;
                 }
 
+                if (SolutionExplorerSelectionOwnsMembersToolWindow())
+                {
+                    return;
+                }
+
                 var currentOpenTextEditorDocument = GetCurrentOpenCSharpTextEditorDocument();
                 if (currentOpenTextEditorDocument != null)
                 {
@@ -858,6 +1001,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                     return;
                 }
 
+                if (SolutionExplorerSelectionOwnsMembersToolWindow())
+                {
+                    return;
+                }
+
                 var currentOpenTextEditorDocument = GetCurrentOpenCSharpTextEditorDocument();
                 if (currentOpenTextEditorDocument != null)
                 {
@@ -889,6 +1037,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             {
                 await System.Threading.Tasks.Task.Delay(100);
                 await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                if (SolutionExplorerSelectionOwnsMembersToolWindow())
+                {
+                    return;
+                }
 
                 if (TryRefreshFromActiveDesigner())
                 {

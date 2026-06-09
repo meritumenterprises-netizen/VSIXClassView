@@ -19,6 +19,8 @@ public sealed class ClassMembersNavigatorPackage : AsyncPackage
     private ActiveDocumentTracker? _tracker;
     private DTE2? _dte;
     private SolutionEvents? _solutionEvents;
+    private ShowClassMembersCommand? _showClassMembersCommand;
+    private MembersToolWindow? _observedMembersWindow;
 
     protected override async Task InitializeAsync(
         CancellationToken cancellationToken,
@@ -36,13 +38,14 @@ public sealed class ClassMembersNavigatorPackage : AsyncPackage
         await System.Threading.Tasks.Task.Delay(3000, DisposalToken);
         await JoinableTaskFactory.SwitchToMainThreadAsync(DisposalToken);
 
-        await ShowClassMembersCommand.InitializeAsync(this, DisposalToken);
+        _showClassMembersCommand = await ShowClassMembersCommand.InitializeAsync(this, DisposalToken);
 
         _dte = await GetServiceAsync(typeof(DTE)) as DTE2;
         if (_dte != null)
         {
             _solutionEvents = _dte.Events.SolutionEvents;
             _solutionEvents.Opened += SolutionOpened;
+            _solutionEvents.AfterClosing += SolutionAfterClosing;
         }
 
         await EnsureTrackerForRestoredToolWindowAsync();
@@ -65,6 +68,40 @@ public sealed class ClassMembersNavigatorPackage : AsyncPackage
         await ShowMembersToolWindowForCSharpSolutionAsync();
     }
 
+    private void SolutionAfterClosing()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        JoinableTaskFactory
+            .RunAsync(ResetVisibleMembersToolWindowAsync)
+            .FileAndForget("VSIXProject1/SolutionAfterClosing");
+    }
+
+    private async Task ResetVisibleMembersToolWindowAsync()
+    {
+        await JoinableTaskFactory.SwitchToMainThreadAsync(DisposalToken);
+
+        var window = await FindToolWindowAsync(
+            typeof(MembersToolWindow),
+            0,
+            create: false,
+            DisposalToken);
+
+        if (window is not MembersToolWindow membersWindow)
+        {
+            return;
+        }
+
+        ObserveMembersToolWindow(membersWindow);
+
+        if (membersWindow.Frame is IVsWindowFrame frame &&
+            frame.IsVisible() == VSConstants.S_OK)
+        {
+            await EnsureTrackerInitializedAsync(membersWindow);
+            _tracker?.Reset();
+        }
+    }
+
     private async Task ShowMembersToolWindowForCSharpSolutionAsync()
     {
         await JoinableTaskFactory.SwitchToMainThreadAsync(DisposalToken);
@@ -77,7 +114,7 @@ public sealed class ClassMembersNavigatorPackage : AsyncPackage
                 return;
             }
 
-            if (await MembersToolWindowIsVisibleAsync())
+            if (await IsMembersToolWindowVisibleAsync())
             {
                 return;
             }
@@ -89,7 +126,7 @@ public sealed class ClassMembersNavigatorPackage : AsyncPackage
 
             await JoinableTaskFactory.SwitchToMainThreadAsync(DisposalToken);
 
-            if (solutionHasCSharpProject && !await MembersToolWindowIsVisibleAsync())
+            if (solutionHasCSharpProject && !await IsMembersToolWindowVisibleAsync())
             {
                 await ShowMembersToolWindowAsync();
             }
@@ -100,7 +137,7 @@ public sealed class ClassMembersNavigatorPackage : AsyncPackage
         }
     }
 
-    private async System.Threading.Tasks.Task<bool> MembersToolWindowIsVisibleAsync()
+    public async System.Threading.Tasks.Task<bool> IsMembersToolWindowVisibleAsync()
     {
         await JoinableTaskFactory.SwitchToMainThreadAsync(DisposalToken);
 
@@ -115,6 +152,7 @@ public sealed class ClassMembersNavigatorPackage : AsyncPackage
             return false;
         }
 
+        ObserveMembersToolWindow(membersWindow);
         await EnsureTrackerInitializedAsync(membersWindow);
 
         if (membersWindow.Frame is not IVsWindowFrame frame)
@@ -150,13 +188,40 @@ public sealed class ClassMembersNavigatorPackage : AsyncPackage
 
         if (window is MembersToolWindow membersWindow)
         {
+            ObserveMembersToolWindow(membersWindow);
             await EnsureTrackerInitializedAsync(membersWindow);
 
             if (membersWindow.Frame is IVsWindowFrame frame)
             {
                 Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(frame.Show());
+                RefreshShowClassMembersCommandStatus();
                 _tracker?.RefreshActiveDocument();
             }
+        }
+    }
+
+    public async Task FocusMembersToolWindowAsync()
+    {
+        await JoinableTaskFactory.SwitchToMainThreadAsync(DisposalToken);
+
+        var window = await FindToolWindowAsync(
+            typeof(MembersToolWindow),
+            0,
+            create: false,
+            DisposalToken);
+
+        if (window is not MembersToolWindow membersWindow)
+        {
+            return;
+        }
+
+        ObserveMembersToolWindow(membersWindow);
+
+        if (membersWindow.Frame is IVsWindowFrame frame &&
+            frame.IsVisible() == VSConstants.S_OK)
+        {
+            Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(frame.Show());
+            RefreshShowClassMembersCommandStatus();
         }
     }
 
@@ -174,6 +239,7 @@ public sealed class ClassMembersNavigatorPackage : AsyncPackage
 
             if (window is MembersToolWindow membersWindow)
             {
+                ObserveMembersToolWindow(membersWindow);
                 await EnsureTrackerInitializedAsync(membersWindow);
             }
         }
@@ -194,5 +260,35 @@ public sealed class ClassMembersNavigatorPackage : AsyncPackage
 
         _tracker = new ActiveDocumentTracker(this, membersWindow.Control);
         await _tracker.InitializeAsync();
+    }
+
+    private void ObserveMembersToolWindow(MembersToolWindow membersWindow)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (ReferenceEquals(_observedMembersWindow, membersWindow))
+        {
+            return;
+        }
+
+        if (_observedMembersWindow != null)
+        {
+            _observedMembersWindow.VisibilityChanged -= MembersToolWindowVisibilityChanged;
+        }
+
+        _observedMembersWindow = membersWindow;
+        _observedMembersWindow.VisibilityChanged += MembersToolWindowVisibilityChanged;
+    }
+
+    private void MembersToolWindowVisibilityChanged(object sender, EventArgs e)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        RefreshShowClassMembersCommandStatus();
+    }
+
+    private void RefreshShowClassMembersCommandStatus()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        _showClassMembersCommand?.RefreshStatus();
     }
 }
