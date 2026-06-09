@@ -53,6 +53,17 @@ namespace VSIXProject1
                 : GetMembersForClass(currentClass, parsedText, sourceFilePath);
         }
 
+        public static IReadOnlyList<string> GetClassNames(string sourceText)
+        {
+            var tree = CSharpSyntaxTree.ParseText(sourceText);
+            var root = tree.GetCompilationUnitRoot();
+
+            return root.DescendantNodes()
+                .OfType<ClassDeclarationSyntax>()
+                .Select(classDeclaration => classDeclaration.Identifier.ValueText)
+                .ToList();
+        }
+
         private static IReadOnlyList<MemberItem> GetMembersForClass(
             ClassDeclarationSyntax currentClass,
             SourceText parsedText,

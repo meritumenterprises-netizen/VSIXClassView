@@ -3,6 +3,8 @@ using EnvDTE80;
 using Microsoft.VisualStudio.Shell;
 using System;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using VSIXProject1;
 
@@ -12,6 +14,7 @@ public sealed class ActiveDocumentTracker
     private readonly MembersToolWindowControl _control;
     private DTE2? _dte;
     private SelectionEvents? _selectionEvents;
+    private DocumentEvents? _documentEvents;
 
     public ActiveDocumentTracker(
         AsyncPackage package,
@@ -35,8 +38,27 @@ public sealed class ActiveDocumentTracker
 
         _selectionEvents = _dte.Events.SelectionEvents;
         _selectionEvents.OnChange += Refresh;
+        _documentEvents = _dte.Events.DocumentEvents;
+        _documentEvents.DocumentSaved += DocumentSaved;
 
         Refresh();
+    }
+
+    private void DocumentSaved(Document document)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        try
+        {
+            if (document.FullName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+            {
+                RefreshFromDocument(document);
+            }
+        }
+        catch
+        {
+            _control.SetMembers(Array.Empty<MemberItem>());
+        }
     }
 
     private void Refresh()
@@ -50,30 +72,36 @@ public sealed class ActiveDocumentTracker
                 return;
             }
 
-            var doc = _dte?.ActiveDocument;
-            if (doc == null || !doc.FullName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-            {
-                _control.SetMembers(Array.Empty<MemberItem>());
-                return;
-            }
-
-            var textDoc = doc.Object("TextDocument") as TextDocument;
-            if (textDoc == null)
-            {
-                return;
-            }
-
-            var editPoint = textDoc.StartPoint.CreateEditPoint();
-            var text = editPoint.GetText(textDoc.EndPoint);
-            var caretOffset = GetCaretOffset(textDoc);
-            var members = MemberScanner.GetMembersForClassAtCaret(text, caretOffset, doc.FullName);
-
-            _control.SetMembers(members);
+            RefreshFromDocument(_dte?.ActiveDocument);
         }
         catch
         {
             _control.SetMembers(Array.Empty<MemberItem>());
         }
+    }
+
+    private void RefreshFromDocument(Document? doc)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (doc == null || !doc.FullName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            _control.SetMembers(Array.Empty<MemberItem>());
+            return;
+        }
+
+        var textDoc = doc.Object("TextDocument") as TextDocument;
+        if (textDoc == null)
+        {
+            return;
+        }
+
+        var editPoint = textDoc.StartPoint.CreateEditPoint();
+        var text = editPoint.GetText(textDoc.EndPoint);
+        var caretOffset = GetCaretOffset(textDoc);
+        var members = MemberScanner.GetMembersForClassAtCaret(text, caretOffset, doc.FullName);
+
+        _control.SetMembers(members);
     }
 
     private bool TryRefreshFromSolutionExplorerSelection()
@@ -111,36 +139,14 @@ public sealed class ActiveDocumentTracker
 
         foreach (UIHierarchyItem selectedItem in selectedItems)
         {
-            if (selectedItem.Object is CodeClass codeClass)
+            var projectItem = FindOwningProjectItem(selectedItem);
+            if (projectItem != null)
             {
-                var filePath = GetProjectItemFilePath(codeClass.ProjectItem);
-                if (filePath != null)
-                {
-                    return (filePath, codeClass.Name);
-                }
-            }
-
-            if (selectedItem.Object is ProjectItem projectItem)
-            {
-                if (projectItem.Object is CodeClass projectItemClass)
-                {
-                    var classFilePath = GetProjectItemFilePath(projectItemClass.ProjectItem);
-                    if (classFilePath != null)
-                    {
-                        return (classFilePath, projectItemClass.Name);
-                    }
-                }
-
                 var filePath = GetProjectItemFilePath(projectItem);
                 if (filePath != null)
                 {
-                    var selectedClassName = GetClassNameFromProjectItem(projectItem, selectedItem.Name);
-                    if (selectedClassName != null)
-                    {
-                        return (filePath, selectedClassName);
-                    }
-
-                    return (filePath, null);
+                    var className = GetSelectedClassNameFromFile(filePath, selectedItem.Name);
+                    return (filePath, className);
                 }
             }
         }
@@ -148,42 +154,36 @@ public sealed class ActiveDocumentTracker
         return null;
     }
 
-    private static string? GetClassNameFromProjectItem(ProjectItem projectItem, string selectedItemName)
+    private static ProjectItem? FindOwningProjectItem(UIHierarchyItem selectedItem)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var fileCodeModel = projectItem.FileCodeModel;
-        if (fileCodeModel == null)
+        if (selectedItem.Object is ProjectItem projectItem)
+        {
+            return projectItem;
+        }
+
+        var parent = GetParentHierarchyItem(selectedItem);
+        return parent == null ? null : FindOwningProjectItem(parent);
+    }
+
+    private static UIHierarchyItem? GetParentHierarchyItem(UIHierarchyItem selectedItem)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        try
+        {
+            var collection = selectedItem.Collection;
+            var parent = collection
+                .GetType()
+                .InvokeMember("Parent", BindingFlags.GetProperty, null, collection, null);
+
+            return parent as UIHierarchyItem;
+        }
+        catch
         {
             return null;
         }
-
-        return FindSelectedClassName(fileCodeModel.CodeElements, selectedItemName);
-    }
-
-    private static string? FindSelectedClassName(CodeElements codeElements, string selectedItemName)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        foreach (CodeElement codeElement in codeElements)
-        {
-            if (codeElement is CodeClass codeClass &&
-                string.Equals(codeClass.Name, selectedItemName, StringComparison.Ordinal))
-            {
-                return codeClass.Name;
-            }
-
-            var childClassName = codeElement.Children == null
-                ? null
-                : FindSelectedClassName(codeElement.Children, selectedItemName);
-
-            if (childClassName != null)
-            {
-                return childClassName;
-            }
-        }
-
-        return null;
     }
 
     private static string? GetProjectItemFilePath(ProjectItem projectItem)
@@ -200,6 +200,13 @@ public sealed class ActiveDocumentTracker
         }
 
         return null;
+    }
+
+    private static string? GetSelectedClassNameFromFile(string filePath, string selectedNodeName)
+    {
+        var sourceText = File.ReadAllText(filePath);
+        return MemberScanner.GetClassNames(sourceText)
+            .FirstOrDefault(className => string.Equals(className, selectedNodeName, StringComparison.Ordinal));
     }
 
     private static int GetCaretOffset(TextDocument textDoc)

@@ -1,3 +1,5 @@
+using EnvDTE;
+using EnvDTE80;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using System;
@@ -12,6 +14,8 @@ using Task = System.Threading.Tasks.Task;
 public sealed class ClassMembersNavigatorPackage : AsyncPackage
 {
     private ActiveDocumentTracker? _tracker;
+    private DTE2? _dte;
+    private SolutionEvents? _solutionEvents;
 
     protected override async Task InitializeAsync(
         CancellationToken cancellationToken,
@@ -19,6 +23,24 @@ public sealed class ClassMembersNavigatorPackage : AsyncPackage
     {
         await JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
         await ShowClassMembersCommand.InitializeAsync(this, cancellationToken);
+
+        _dte = await GetServiceAsync(typeof(DTE)) as DTE2;
+        if (_dte != null)
+        {
+            _solutionEvents = _dte.Events.SolutionEvents;
+            _solutionEvents.Opened += SolutionOpened;
+        }
+
+        await EnsureTrackerForRestoredToolWindowAsync();
+    }
+
+    private void SolutionOpened()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        JoinableTaskFactory
+            .RunAsync(EnsureTrackerForRestoredToolWindowAsync)
+            .FileAndForget("VSIXProject1/EnsureRestoredToolWindowTracker");
     }
 
     public async Task ShowMembersToolWindowAsync()
@@ -33,16 +55,48 @@ public sealed class ClassMembersNavigatorPackage : AsyncPackage
 
         if (window is MembersToolWindow membersWindow)
         {
-            if (_tracker == null)
-            {
-                _tracker = new ActiveDocumentTracker(this, membersWindow.Control);
-                await _tracker.InitializeAsync();
-            }
+            await EnsureTrackerInitializedAsync(membersWindow);
 
             if (membersWindow.Frame is IVsWindowFrame frame)
             {
                 Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(frame.Show());
             }
         }
+    }
+
+    private async Task EnsureTrackerForRestoredToolWindowAsync()
+    {
+        await JoinableTaskFactory.SwitchToMainThreadAsync(DisposalToken);
+
+        try
+        {
+            var window = await FindToolWindowAsync(
+                typeof(MembersToolWindow),
+                0,
+                create: false,
+                DisposalToken);
+
+            if (window is MembersToolWindow membersWindow)
+            {
+                await EnsureTrackerInitializedAsync(membersWindow);
+            }
+        }
+        catch
+        {
+            // A restored tool window should never make package load fail.
+        }
+    }
+
+    private async Task EnsureTrackerInitializedAsync(MembersToolWindow membersWindow)
+    {
+        await JoinableTaskFactory.SwitchToMainThreadAsync(DisposalToken);
+
+        if (_tracker != null)
+        {
+            return;
+        }
+
+        _tracker = new ActiveDocumentTracker(this, membersWindow.Control);
+        await _tracker.InitializeAsync();
     }
 }
