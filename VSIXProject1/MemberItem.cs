@@ -10,6 +10,7 @@ namespace VSIXProject1
     {
         public MemberItem() { }
         public required string Name { get; init; }
+        public required string DeclaringClassName { get; init; }
         public required string DisplayText { get; init; }
         public required MemberKind Kind { get; init; }
         public required int StartOffset { get; init; }

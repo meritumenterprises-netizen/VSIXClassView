@@ -34,6 +34,19 @@ namespace VSIXProject1
             return GetMembersForClass(currentClass, parsedText, sourceFilePath);
         }
 
+        public static string? GetClassNameAtCaret(string sourceText, int caretOffset)
+        {
+            var tree = CSharpSyntaxTree.ParseText(sourceText);
+            var root = tree.GetCompilationUnitRoot();
+            var token = root.FindToken(Math.Max(0, Math.Min(caretOffset, sourceText.Length)));
+
+            return token.Parent?
+                .AncestorsAndSelf()
+                .OfType<ClassDeclarationSyntax>()
+                .FirstOrDefault()
+                ?.Identifier.ValueText;
+        }
+
         public static IReadOnlyList<MemberItem> GetMembersForClassNameOrFirst(
             string sourceText,
             string? preferredClassName,
@@ -77,6 +90,7 @@ namespace VSIXProject1
                     return new MemberItem
                     {
                         Name = v.Identifier.ValueText,
+                        DeclaringClassName = currentClass.Identifier.ValueText,
                         DisplayText = $"{v.Identifier.ValueText} : {GetShortTypeName(f.Declaration.Type)}",
                         Kind = MemberKind.Field,
                         StartOffset = f.SpanStart,
@@ -99,6 +113,7 @@ namespace VSIXProject1
                     return new MemberItem
                     {
                         Name = p.Identifier.ValueText,
+                        DeclaringClassName = currentClass.Identifier.ValueText,
                         DisplayText = $"{p.Identifier.ValueText} : {GetShortTypeName(p.Type)} {GetPropertyAccessorDisplayText(p)}".TrimEnd(),
                         Kind = MemberKind.Property,
                         StartOffset = p.SpanStart,
@@ -122,6 +137,7 @@ namespace VSIXProject1
                     return new MemberItem
                     {
                         Name = m.Identifier.ValueText,
+                        DeclaringClassName = currentClass.Identifier.ValueText,
                         DisplayText = $"{GetShortTypeName(m.ReturnType)} : {m.Identifier.ValueText} ({GetParameterDisplayText(m.ParameterList)})",
                         Kind = MemberKind.Method,
                         StartOffset = m.SpanStart,

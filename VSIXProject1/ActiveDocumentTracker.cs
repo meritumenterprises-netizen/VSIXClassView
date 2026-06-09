@@ -1,20 +1,28 @@
 using EnvDTE;
 using EnvDTE80;
+using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using VSIXProject1;
 
-public sealed class ActiveDocumentTracker
+public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
 {
     private readonly AsyncPackage _package;
     private readonly MembersToolWindowControl _control;
     private DTE2? _dte;
     private SelectionEvents? _selectionEvents;
     private DocumentEvents? _documentEvents;
+    private IVsRunningDocumentTable? _runningDocumentTable;
+    private uint _runningDocumentTableEventsCookie;
+    private string? _loadedSourceFilePath;
+    private string? _loadedClassName;
+    private DateTime _lastSolutionExplorerRefreshUtc = DateTime.MinValue;
 
     public ActiveDocumentTracker(
         AsyncPackage package,
@@ -41,7 +49,24 @@ public sealed class ActiveDocumentTracker
         _documentEvents = _dte.Events.DocumentEvents;
         _documentEvents.DocumentSaved += DocumentSaved;
 
+        _runningDocumentTable = await _package.GetServiceAsync(typeof(SVsRunningDocumentTable)) as IVsRunningDocumentTable;
+        _runningDocumentTable?.AdviseRunningDocTableEvents(this, out _runningDocumentTableEventsCookie);
+
         Refresh();
+    }
+
+    public void RefreshActiveDocument()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        try
+        {
+            RefreshFromDocument(_dte?.ActiveDocument);
+        }
+        catch
+        {
+            _control.SetMembers(Array.Empty<MemberItem>());
+        }
     }
 
     private void DocumentSaved(Document document)
@@ -52,7 +77,7 @@ public sealed class ActiveDocumentTracker
         {
             if (document.FullName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
             {
-                RefreshFromDocument(document);
+                RefreshFromDocument(document, force: true);
             }
         }
         catch
@@ -80,13 +105,14 @@ public sealed class ActiveDocumentTracker
         }
     }
 
-    private void RefreshFromDocument(Document? doc)
+    private void RefreshFromDocument(Document? doc, bool force = false)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
         if (doc == null || !doc.FullName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
         {
             _control.SetMembers(Array.Empty<MemberItem>());
+            ClearLoadedSource();
             return;
         }
 
@@ -96,12 +122,25 @@ public sealed class ActiveDocumentTracker
             return;
         }
 
+        if (!force && WasJustLoadedFromSolutionExplorer(doc.FullName))
+        {
+            return;
+        }
+
         var editPoint = textDoc.StartPoint.CreateEditPoint();
         var text = editPoint.GetText(textDoc.EndPoint);
         var caretOffset = GetCaretOffset(textDoc);
+
+        var classNameAtCaret = MemberScanner.GetClassNameAtCaret(text, caretOffset);
+        if (!force && IsCurrentlyLoaded(doc.FullName, classNameAtCaret))
+        {
+            return;
+        }
+
         var members = MemberScanner.GetMembersForClassAtCaret(text, caretOffset, doc.FullName);
 
         _control.SetMembers(members);
+        SetLoadedSource(members, doc.FullName, classNameAtCaret);
     }
 
     private bool TryRefreshFromSolutionExplorerSelection()
@@ -121,10 +160,47 @@ public sealed class ActiveDocumentTracker
 
         var sourceText = File.ReadAllText(selection.Value.FilePath);
         var preferredClassName = selection.Value.ClassName ?? Path.GetFileNameWithoutExtension(selection.Value.FilePath);
+        if (IsCurrentlyLoaded(selection.Value.FilePath, preferredClassName))
+        {
+            return true;
+        }
+
         var members = MemberScanner.GetMembersForClassNameOrFirst(sourceText, preferredClassName, selection.Value.FilePath);
         _control.SetMembers(members);
+        SetLoadedSource(members, selection.Value.FilePath, preferredClassName);
+        _lastSolutionExplorerRefreshUtc = DateTime.UtcNow;
 
         return true;
+    }
+
+    private bool WasJustLoadedFromSolutionExplorer(string sourceFilePath)
+    {
+        return !string.IsNullOrEmpty(_loadedSourceFilePath)
+            && string.Equals(_loadedSourceFilePath, sourceFilePath, StringComparison.OrdinalIgnoreCase)
+            && DateTime.UtcNow - _lastSolutionExplorerRefreshUtc < TimeSpan.FromSeconds(2);
+    }
+
+    private bool IsCurrentlyLoaded(string sourceFilePath, string? className)
+    {
+        return !string.IsNullOrEmpty(_loadedSourceFilePath)
+            && !string.IsNullOrEmpty(_loadedClassName)
+            && string.Equals(_loadedSourceFilePath, sourceFilePath, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(_loadedClassName, className, StringComparison.Ordinal);
+    }
+
+    private void ClearLoadedSource()
+    {
+        _loadedSourceFilePath = null;
+        _loadedClassName = null;
+    }
+
+    private void SetLoadedSource(
+        IReadOnlyList<MemberItem> members,
+        string sourceFilePath,
+        string? requestedClassName)
+    {
+        _loadedSourceFilePath = sourceFilePath;
+        _loadedClassName = members.FirstOrDefault()?.DeclaringClassName ?? requestedClassName;
     }
 
     private (string FilePath, string? ClassName)? GetSelectedSolutionExplorerCodeSelection()
@@ -249,5 +325,73 @@ public sealed class ActiveDocumentTracker
             item.NameEndLine + 1,
             item.NameEndColumn + 1,
             Extend: true);
+    }
+
+    public int OnAfterAttributeChange(uint docCookie, uint grfAttribs)
+    {
+        return VSConstants.S_OK;
+    }
+
+    public int OnAfterDocumentWindowHide(uint docCookie, IVsWindowFrame pFrame)
+    {
+        return VSConstants.S_OK;
+    }
+
+    public int OnAfterFirstDocumentLock(
+        uint docCookie,
+        uint dwRDTLockType,
+        uint dwReadLocksRemaining,
+        uint dwEditLocksRemaining)
+    {
+        return VSConstants.S_OK;
+    }
+
+    public int OnAfterSave(uint docCookie)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        RefreshActiveDocumentSoon(force: true);
+        return VSConstants.S_OK;
+    }
+
+    public int OnBeforeDocumentWindowShow(uint docCookie, int fFirstShow, IVsWindowFrame pFrame)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        RefreshActiveDocumentSoon();
+        return VSConstants.S_OK;
+    }
+
+    public int OnBeforeLastDocumentUnlock(
+        uint docCookie,
+        uint dwRDTLockType,
+        uint dwReadLocksRemaining,
+        uint dwEditLocksRemaining)
+    {
+        return VSConstants.S_OK;
+    }
+
+    private void RefreshActiveDocumentSoon(bool force = false)
+    {
+        _package.JoinableTaskFactory
+            .RunAsync(async () =>
+            {
+                await System.Threading.Tasks.Task.Delay(100);
+                await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
+                if (force)
+                {
+                    try
+                    {
+                        RefreshFromDocument(_dte?.ActiveDocument, force: true);
+                    }
+                    catch
+                    {
+                        _control.SetMembers(Array.Empty<MemberItem>());
+                    }
+                }
+                else
+                {
+                    RefreshActiveDocument();
+                }
+            })
+            .FileAndForget("VSIXProject1/RefreshActiveDocumentSoon");
     }
 }
