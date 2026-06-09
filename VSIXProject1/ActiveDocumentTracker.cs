@@ -59,13 +59,13 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        if (ActiveWindowIsDesigner())
-        {
-            return;
-        }
-
         try
         {
+            if (TryRefreshFromActiveDesigner())
+            {
+                return;
+            }
+
             RefreshFromDocument(_dte?.ActiveDocument);
         }
         catch
@@ -99,6 +99,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         {
             if (ActiveWindowIsDesigner())
             {
+                TryRefreshFromActiveDesigner();
                 return;
             }
 
@@ -118,11 +119,6 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     private void RefreshFromDocument(Document? doc, bool force = false)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-
-        if (!force && ActiveWindowIsDesigner())
-        {
-            return;
-        }
 
         if (doc == null || !doc.FullName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
         {
@@ -184,6 +180,42 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         _control.SetMembers(members);
         SetLoadedSource(members, selection.Value.FilePath, preferredClassName);
         _lastSolutionExplorerRefreshUtc = DateTime.UtcNow;
+
+        return true;
+    }
+
+    private bool TryRefreshFromActiveDesigner()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (!ActiveWindowIsDesigner())
+        {
+            return false;
+        }
+
+        var filePath = _dte?.ActiveDocument?.FullName;
+        if (string.IsNullOrEmpty(filePath))
+        {
+            return false;
+        }
+
+        var designerSourceFilePath = filePath!;
+        if (!designerSourceFilePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) ||
+            !File.Exists(designerSourceFilePath))
+        {
+            return false;
+        }
+
+        var sourceText = File.ReadAllText(designerSourceFilePath);
+        var preferredClassName = Path.GetFileNameWithoutExtension(designerSourceFilePath);
+        if (IsCurrentlyLoaded(designerSourceFilePath, preferredClassName))
+        {
+            return true;
+        }
+
+        var members = MemberScanner.GetMembersForClassNameOrFirst(sourceText, preferredClassName, designerSourceFilePath);
+        _control.SetMembers(members);
+        SetLoadedSource(members, designerSourceFilePath, preferredClassName);
 
         return true;
     }
@@ -314,13 +346,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        if (!string.IsNullOrEmpty(item.SourceFilePath) &&
-            !string.Equals(_dte?.ActiveDocument?.FullName, item.SourceFilePath, StringComparison.OrdinalIgnoreCase))
-        {
-            _dte?.ItemOperations.OpenFile(item.SourceFilePath);
-        }
-
-        var doc = _dte?.ActiveDocument;
+        var doc = GetTextViewDocument(item);
         if (doc == null)
         {
             return;
@@ -332,14 +358,63 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             return;
         }
 
-        textDoc.Selection.MoveToLineAndOffset(
-            item.NameStartLine + 1,
-            item.NameStartColumn + 1);
+        SelectMemberName(textDoc, item);
+    }
 
-        textDoc.Selection.MoveToLineAndOffset(
-            item.NameEndLine + 1,
-            item.NameEndColumn + 1,
-            Extend: true);
+    private Document? GetTextViewDocument(MemberItem item)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (!string.IsNullOrEmpty(item.SourceFilePath))
+        {
+            try
+            {
+                var textWindow = _dte?.ItemOperations.OpenFile(
+                    item.SourceFilePath,
+                    EnvDTE.Constants.vsViewKindTextView);
+
+                textWindow?.Activate();
+
+                if (textWindow?.Document != null)
+                {
+                    return textWindow.Document;
+                }
+            }
+            catch
+            {
+                return _dte?.ActiveDocument;
+            }
+        }
+
+        return _dte?.ActiveDocument;
+    }
+
+    private static void SelectMemberName(TextDocument textDoc, MemberItem item)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        try
+        {
+            textDoc.Selection.MoveToLineAndOffset(
+                item.NameStartLine + 1,
+                item.NameStartColumn + 1);
+
+            textDoc.Selection.MoveToLineAndOffset(
+                item.NameEndLine + 1,
+                item.NameEndColumn + 1,
+                Extend: true);
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            var start = textDoc.StartPoint.CreateEditPoint();
+            start.MoveToLineAndOffset(item.NameStartLine + 1, item.NameStartColumn + 1);
+
+            var end = textDoc.StartPoint.CreateEditPoint();
+            end.MoveToLineAndOffset(item.NameEndLine + 1, item.NameEndColumn + 1);
+
+            textDoc.Selection.MoveToPoint(start);
+            textDoc.Selection.MoveToPoint(end, true);
+        }
     }
 
     private bool ActiveWindowIsDesigner()
@@ -410,7 +485,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             {
                 await System.Threading.Tasks.Task.Delay(100);
                 await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
-                if (!force && ActiveWindowIsDesigner())
+                if (!force && TryRefreshFromActiveDesigner())
                 {
                     return;
                 }

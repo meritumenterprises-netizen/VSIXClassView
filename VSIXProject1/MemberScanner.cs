@@ -152,7 +152,64 @@ namespace VSIXProject1
                 })
                 .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
 
-            return fields.Concat(properties).Concat(methods).ToList();
+            var constructors = currentClass.Members
+                .OfType<ConstructorDeclarationSyntax>()
+                .Select(c =>
+                {
+                    var span = parsedText.Lines.GetLinePositionSpan(c.Identifier.Span);
+                    return new MemberItem
+                    {
+                        Name = c.Identifier.ValueText,
+                        DeclaringClassName = currentClass.Identifier.ValueText,
+                        DisplayText = $"ctor {c.Identifier.ValueText} ({GetParameterDisplayText(c.ParameterList)})",
+                        Kind = MemberKind.Method,
+                        StartOffset = c.SpanStart,
+                        NameStartOffset = c.Identifier.SpanStart,
+                        NameLength = c.Identifier.Span.Length,
+                        NameStartLine = span.Start.Line,
+                        NameStartColumn = span.Start.Character,
+                        NameEndLine = span.End.Line,
+                        NameEndColumn = span.End.Character,
+                        SourceFilePath = sourceFilePath
+                    };
+                })
+                .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
+
+            var primaryConstructor = currentClass.ParameterList == null
+                ? Enumerable.Empty<MemberItem>()
+                : new[]
+                {
+                    CreatePrimaryConstructorMemberItem(currentClass, parsedText, sourceFilePath)
+                };
+
+            return fields
+                .Concat(properties)
+                .Concat(primaryConstructor.Concat(constructors).OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
+                .Concat(methods)
+                .ToList();
+        }
+
+        private static MemberItem CreatePrimaryConstructorMemberItem(
+            ClassDeclarationSyntax currentClass,
+            SourceText parsedText,
+            string? sourceFilePath)
+        {
+            var span = parsedText.Lines.GetLinePositionSpan(currentClass.Identifier.Span);
+            return new MemberItem
+            {
+                Name = currentClass.Identifier.ValueText,
+                DeclaringClassName = currentClass.Identifier.ValueText,
+                DisplayText = $"ctor {currentClass.Identifier.ValueText} ({GetParameterDisplayText(currentClass.ParameterList!)})",
+                Kind = MemberKind.Method,
+                StartOffset = currentClass.SpanStart,
+                NameStartOffset = currentClass.Identifier.SpanStart,
+                NameLength = currentClass.Identifier.Span.Length,
+                NameStartLine = span.Start.Line,
+                NameStartColumn = span.Start.Character,
+                NameEndLine = span.End.Line,
+                NameEndColumn = span.End.Character,
+                SourceFilePath = sourceFilePath
+            };
         }
 
         private static string GetParameterDisplayText(ParameterListSyntax parameterList)

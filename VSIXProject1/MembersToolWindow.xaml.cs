@@ -10,8 +10,10 @@ using VSIXProject1;
 
 public partial class MembersToolWindowControl : UserControl, INotifyPropertyChanged
 {
+    private const string NoClassSelectedText = "(not selected)";
+
     private readonly List<MemberItem> _allMembers = new();
-    private string _selectedClassName = string.Empty;
+    private string _selectedClassName = NoClassSelectedText;
 
     public ObservableCollection<MemberItem> Members { get; } = new();
     public string SelectedClassName
@@ -42,7 +44,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
     {
         _allMembers.Clear();
         _allMembers.AddRange(members);
-        SelectedClassName = _allMembers.FirstOrDefault()?.DeclaringClassName ?? string.Empty;
+        SelectedClassName = _allMembers.FirstOrDefault()?.DeclaringClassName ?? NoClassSelectedText;
         ApplyFilter();
     }
 
@@ -62,7 +64,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
 
         Members.Clear();
 
-        foreach (var member in filteredMembers.OrderBy(member => member.Kind).ThenBy(member => member.Name))
+        foreach (var member in filteredMembers.OrderBy(member => member.Kind))
         {
             Members.Add(member);
         }

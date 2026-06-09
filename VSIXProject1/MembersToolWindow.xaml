@@ -18,13 +18,14 @@
 
         <Grid Margin="4">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="48" />
+                <ColumnDefinition Width="40.154" />
+                <ColumnDefinition Width="7.846"/>
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
             <TextBlock Text="Class: "
-                       VerticalAlignment="Center" />
-            <TextBlock Grid.Column="1"
+                       VerticalAlignment="Center" Grid.ColumnSpan="2" />
+            <TextBlock Grid.Column="2"
                        Text="{Binding SelectedClassName}"
                        FontWeight="SemiBold"
                        VerticalAlignment="Center" />
