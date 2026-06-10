@@ -323,6 +323,7 @@ namespace VSIXProject1
         {
             return typeDeclaration is ClassDeclarationSyntax ||
                 typeDeclaration is StructDeclarationSyntax ||
+                typeDeclaration is InterfaceDeclarationSyntax ||
                 typeDeclaration is EnumDeclarationSyntax;
         }
 
@@ -341,6 +342,11 @@ namespace VSIXProject1
             if (typeDeclaration is StructDeclarationSyntax)
             {
                 return $"struct {typeName}";
+            }
+
+            if (typeDeclaration is InterfaceDeclarationSyntax)
+            {
+                return $"interface {typeName}";
             }
 
             if (typeDeclaration.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.StaticKeyword)))
