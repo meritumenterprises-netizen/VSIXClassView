@@ -18,32 +18,17 @@
       <Group guid="guidClassMembersNavigatorCommandSet" id="ClassMembersTopLevelMenuGroup" priority="0x0100">
         <Parent guid="guidClassMembersNavigatorCommandSet" id="ClassMembersTopLevelMenu" />
       </Group>
-      <Group guid="guidClassMembersNavigatorCommandSet" id="ClassMembersContextMenuGroup" priority="0x0600">
-        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN" />
-      </Group>
-      <Group guid="guidClassMembersNavigatorCommandSet" id="ClassMembersEditorAllContextMenuGroup" priority="0x0600">
-        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_EDITOR_ALL" />
-      </Group>
     </Groups>
 
     <Buttons>
       <Button guid="guidClassMembersNavigatorCommandSet" id="ShowClassMembersCommand" priority="0x0100" type="Button">
-        <Parent guid="guidClassMembersNavigatorCommandSet" id="ClassMembersContextMenuGroup" />
+        <Parent guid="guidClassMembersNavigatorCommandSet" id="ClassMembersTopLevelMenuGroup" />
         <Strings>
           <ButtonText>Show Class Members</ButtonText>
         </Strings>
       </Button>
     </Buttons>
   </Commands>
-
-  <CommandPlacements>
-    <CommandPlacement guid="guidClassMembersNavigatorCommandSet" id="ShowClassMembersCommand" priority="0x0100">
-      <Parent guid="guidClassMembersNavigatorCommandSet" id="ClassMembersTopLevelMenuGroup" />
-    </CommandPlacement>
-    <CommandPlacement guid="guidClassMembersNavigatorCommandSet" id="ShowClassMembersCommand" priority="0x0100">
-      <Parent guid="guidClassMembersNavigatorCommandSet" id="ClassMembersEditorAllContextMenuGroup" />
-    </CommandPlacement>
-  </CommandPlacements>
 
   <Symbols>
     <GuidSymbol name="guidClassMembersNavigatorPackage" value="{1CB85797-9814-4F4A-B7D6-4A4E4DD06B45}" />
@@ -52,8 +37,6 @@
       <IDSymbol name="ShowClassMembersCommand" value="0x0100" />
       <IDSymbol name="ClassMembersTopLevelMenu" value="0x1010" />
       <IDSymbol name="ClassMembersTopLevelMenuGroup" value="0x1011" />
-      <IDSymbol name="ClassMembersContextMenuGroup" value="0x1020" />
-      <IDSymbol name="ClassMembersEditorAllContextMenuGroup" value="0x1021" />
     </GuidSymbol>
   </Symbols>
 </CommandTable>
