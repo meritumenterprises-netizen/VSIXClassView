@@ -36,15 +36,21 @@ namespace VSIXProject1
 
     public sealed class MemberDisplayPart
     {
-        public MemberDisplayPart(string text, bool isBold = false, bool isMemberName = false)
+        public MemberDisplayPart(
+            string text,
+            bool isBold = false,
+            bool isMemberName = false,
+            bool isParameterName = false)
         {
             Text = text;
             IsBold = isBold;
             IsMemberName = isMemberName;
+            IsParameterName = isParameterName;
         }
 
         public string Text { get; }
         public bool IsBold { get; }
         public bool IsMemberName { get; }
+        public bool IsParameterName { get; }
     }
 }

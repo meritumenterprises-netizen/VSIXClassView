@@ -223,7 +223,9 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
             textBlock.Inlines.Add(new Run(part.Text)
             {
                 FontWeight = part.IsBold ? FontWeights.Bold : FontWeights.Normal,
-                Foreground = part.IsMemberName ? _memberNameBrush : textBlock.Foreground
+                Foreground = part.IsParameterName
+                    ? Brushes.Blue
+                    : part.IsMemberName ? _memberNameBrush : textBlock.Foreground
             });
         }
     }

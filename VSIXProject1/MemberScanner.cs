@@ -436,7 +436,10 @@ namespace VSIXProject1
                     parts.Add(new MemberDisplayPart(", "));
                 }
 
-                parts.Add(new MemberDisplayPart($"{parameter.Identifier.ValueText}: "));
+                parts.Add(new MemberDisplayPart(
+                    parameter.Identifier.ValueText,
+                    isParameterName: true));
+                parts.Add(new MemberDisplayPart(": "));
                 parts.Add(new MemberDisplayPart(GetShortTypeName(parameter.Type), isBold: true));
             }
 
