@@ -240,7 +240,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         var classNameAtCaret = MemberScanner.GetClassDisplayNameAtCaret(text, caretOffset);
         if (!force && IsCurrentlyLoaded(doc.FullName, classNameAtCaret))
         {
-            _control.SelectMemberAtOffset(caretOffset);
+            _control.SelectMemberAtOffset(doc.FullName, caretOffset);
             return;
         }
 
@@ -249,7 +249,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         _solutionExplorerSelectionOwnsMembersToolWindow = false;
         _control.SetMembers(members);
         SetLoadedSource(members, doc.FullName, classNameAtCaret);
-        _control.SelectMemberAtOffset(caretOffset);
+        _control.SelectMemberAtOffset(doc.FullName, caretOffset);
     }
 
     private bool TryRefreshFromSolutionExplorerSelection()
@@ -372,6 +372,14 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         return !string.IsNullOrEmpty(_loadedSourceFilePath)
             && !string.IsNullOrEmpty(_loadedClassName)
             && string.Equals(_loadedSourceFilePath, sourceFilePath, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(_loadedClassName, className, StringComparison.Ordinal);
+    }
+
+    private bool IsSamePartialClassDifferentSourceFile(string sourceFilePath, string? className)
+    {
+        return !string.IsNullOrEmpty(_loadedSourceFilePath)
+            && !string.IsNullOrEmpty(_loadedClassName)
+            && !string.Equals(_loadedSourceFilePath, sourceFilePath, StringComparison.OrdinalIgnoreCase)
             && string.Equals(_loadedClassName, className, StringComparison.Ordinal);
     }
 
@@ -792,10 +800,14 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         var kind = activeWindow.Kind ?? string.Empty;
         var caption = activeWindow.Caption ?? string.Empty;
 
+        if (DocumentIsCSharpTextEditor(activeWindow.Document))
+        {
+            return false;
+        }
+
         return kind.IndexOf("Designer", StringComparison.OrdinalIgnoreCase) >= 0 ||
             caption.EndsWith(" [Design]", StringComparison.OrdinalIgnoreCase) ||
-            caption.EndsWith(" (Design)", StringComparison.OrdinalIgnoreCase) ||
-            caption.IndexOf("Designer", StringComparison.OrdinalIgnoreCase) >= 0;
+            caption.EndsWith(" (Design)", StringComparison.OrdinalIgnoreCase);
     }
 
     private bool ActiveWindowIsSolutionExplorer()

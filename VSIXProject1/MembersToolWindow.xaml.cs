@@ -48,13 +48,16 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
 
     public void SetMembers(IEnumerable<MemberItem> members)
     {
+        var previousSourceFilePath = _allMembers.FirstOrDefault()?.SourceFilePath;
         _allMembers.Clear();
         _allMembers.AddRange(members);
         var selectedClassName = _allMembers.FirstOrDefault()?.DeclaringClassName ?? NoClassSelectedText;
+        var selectedSourceFilePath = _allMembers.FirstOrDefault()?.SourceFilePath;
         var selectedClassChanged = !string.Equals(SelectedClassName, selectedClassName, StringComparison.Ordinal);
+        var selectedSourceChanged = !string.Equals(previousSourceFilePath, selectedSourceFilePath, StringComparison.OrdinalIgnoreCase);
 
         SelectedClassName = selectedClassName;
-        if (selectedClassChanged)
+        if (selectedClassChanged || selectedSourceChanged)
         {
             MembersFilterTextBox.Text = string.Empty;
         }
@@ -73,9 +76,10 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
         }
     }
 
-    public void SelectMemberAtOffset(int caretOffset)
+    public void SelectMemberAtOffset(string sourceFilePath, int caretOffset)
     {
         var orderedMembers = _allMembers
+            .Where(member => string.Equals(member.SourceFilePath, sourceFilePath, StringComparison.OrdinalIgnoreCase))
             .OrderBy(member => member.StartOffset)
             .ToList();
         var selectedMember = default(MemberItem);
