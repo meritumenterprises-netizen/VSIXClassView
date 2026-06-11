@@ -16,6 +16,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
     private const string NoClassSelectedText = "(not selected)";
 
     private readonly List<MemberItem> _allMembers = new();
+    private readonly Dictionary<string, bool> _groupExpandedStates = new(StringComparer.Ordinal);
     private string _selectedClassName = NoClassSelectedText;
     private Brush _memberNameBrush = Brushes.Blue;
 
@@ -133,6 +134,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
 
     private void ExpandGroup(string groupHeading)
     {
+        _groupExpandedStates[groupHeading] = true;
         MembersList.UpdateLayout();
 
         foreach (var groupItem in FindVisualChildren<GroupItem>(MembersList))
@@ -148,6 +150,44 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
                 }
 
                 return;
+            }
+        }
+    }
+
+    private void GroupExpander_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Expander expander || expander.DataContext is not CollectionViewGroup group)
+        {
+            return;
+        }
+
+        var groupHeading = group.Name?.ToString();
+        if (string.IsNullOrEmpty(groupHeading))
+        {
+            return;
+        }
+
+        expander.IsExpanded = !_groupExpandedStates.TryGetValue(groupHeading!, out var isExpanded) || isExpanded;
+    }
+
+    private void GroupExpander_Expanded(object sender, RoutedEventArgs e)
+    {
+        SetGroupExpandedState(sender, isExpanded: true);
+    }
+
+    private void GroupExpander_Collapsed(object sender, RoutedEventArgs e)
+    {
+        SetGroupExpandedState(sender, isExpanded: false);
+    }
+
+    private void SetGroupExpandedState(object sender, bool isExpanded)
+    {
+        if (sender is Expander { DataContext: CollectionViewGroup group })
+        {
+            var groupHeading = group.Name?.ToString();
+            if (!string.IsNullOrEmpty(groupHeading))
+            {
+                _groupExpandedStates[groupHeading!] = isExpanded;
             }
         }
     }

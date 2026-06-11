@@ -421,7 +421,9 @@ namespace VSIXProject1
             return string.Join(
                 ", ",
                 parameterList.Parameters.Select(parameter =>
-                    $"{parameter.Identifier.ValueText}: {GetShortTypeName(parameter.Type)}"));
+                    parameter.Default == null
+                        ? $"{parameter.Identifier.ValueText}: {GetShortTypeName(parameter.Type)}"
+                        : $"{parameter.Identifier.ValueText}: {GetShortTypeName(parameter.Type)} = {parameter.Default.Value}"));
         }
 
         private static IReadOnlyList<MemberDisplayPart> GetParameterDisplayParts(ParameterListSyntax parameterList)
@@ -441,6 +443,10 @@ namespace VSIXProject1
                     isParameterName: true));
                 parts.Add(new MemberDisplayPart(": "));
                 parts.Add(new MemberDisplayPart(GetShortTypeName(parameter.Type), isBold: true));
+                if (parameter.Default != null)
+                {
+                    parts.Add(new MemberDisplayPart($" = {parameter.Default.Value}"));
+                }
             }
 
             return parts;
