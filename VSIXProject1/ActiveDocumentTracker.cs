@@ -240,6 +240,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         var classNameAtCaret = MemberScanner.GetClassDisplayNameAtCaret(text, caretOffset);
         if (!force && IsCurrentlyLoaded(doc.FullName, classNameAtCaret))
         {
+            _control.SelectMemberAtOffset(caretOffset);
             return;
         }
 
@@ -248,6 +249,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         _solutionExplorerSelectionOwnsMembersToolWindow = false;
         _control.SetMembers(members);
         SetLoadedSource(members, doc.FullName, classNameAtCaret);
+        _control.SelectMemberAtOffset(caretOffset);
     }
 
     private bool TryRefreshFromSolutionExplorerSelection()

@@ -241,11 +241,11 @@ namespace VSIXProject1
                 })
                 .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
 
-            var primaryConstructor = currentTypeDeclaration is ClassDeclarationSyntax primaryConstructorClass &&
-                primaryConstructorClass.ParameterList != null
+            var primaryConstructor = currentTypeDeclaration is TypeDeclarationSyntax primaryConstructorType &&
+                primaryConstructorType.ParameterList != null
                 ? new[]
                 {
-                    CreatePrimaryConstructorMemberItem(primaryConstructorClass, parsedText, sourceFilePath)
+                    CreatePrimaryConstructorMemberItem(primaryConstructorType, parsedText, sourceFilePath)
                 }
                 : Enumerable.Empty<MemberItem>();
 
@@ -289,7 +289,7 @@ namespace VSIXProject1
         }
 
         private static MemberItem CreatePrimaryConstructorMemberItem(
-            ClassDeclarationSyntax currentClass,
+            TypeDeclarationSyntax currentClass,
             SourceText parsedText,
             string? sourceFilePath)
         {
@@ -323,6 +323,7 @@ namespace VSIXProject1
         {
             return typeDeclaration is ClassDeclarationSyntax ||
                 typeDeclaration is StructDeclarationSyntax ||
+                typeDeclaration is RecordDeclarationSyntax ||
                 typeDeclaration is InterfaceDeclarationSyntax ||
                 typeDeclaration is EnumDeclarationSyntax;
         }
@@ -338,6 +339,13 @@ namespace VSIXProject1
             var typeName = typedDeclaration.TypeParameterList == null
                 ? typeDeclaration.Identifier.ValueText
                 : $"{typeDeclaration.Identifier.ValueText}{typedDeclaration.TypeParameterList}";
+
+            if (typeDeclaration is RecordDeclarationSyntax recordDeclaration)
+            {
+                return recordDeclaration.ClassOrStructKeyword.IsKind(SyntaxKind.StructKeyword)
+                    ? $"record struct {typeName}"
+                    : $"record {typeName}";
+            }
 
             if (typeDeclaration is StructDeclarationSyntax)
             {

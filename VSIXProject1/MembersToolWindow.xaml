@@ -40,8 +40,13 @@
         <ListBox x:Name="MembersList"
                  Grid.Row="2"
                  ItemsSource="{Binding Source={StaticResource GroupedMembers}}"
-                 DisplayMemberPath="DisplayText"
                  MouseDoubleClick="MembersList_MouseDoubleClick">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock Text="{Binding DisplayText}"
+                               FontSize="{Binding Tag, RelativeSource={RelativeSource AncestorType=ListBox}}" />
+                </DataTemplate>
+            </ListBox.ItemTemplate>
             <ListBox.GroupStyle>
                 <GroupStyle>
                     <GroupStyle.HeaderTemplate>

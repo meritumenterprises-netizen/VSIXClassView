@@ -38,6 +38,12 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
     {
         InitializeComponent();
         DataContext = this;
+        Loaded += MembersToolWindowControl_Loaded;
+    }
+
+    private void MembersToolWindowControl_Loaded(object sender, RoutedEventArgs e)
+    {
+        MembersList.Tag = Math.Max(1, MembersList.FontSize - 1);
     }
 
     public void SetMembers(IEnumerable<MemberItem> members)
@@ -65,6 +71,37 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
             MembersFilterTextBox.Text = string.Empty;
             ApplyFilter();
         }
+    }
+
+    public void SelectMemberAtOffset(int caretOffset)
+    {
+        var orderedMembers = _allMembers
+            .OrderBy(member => member.StartOffset)
+            .ToList();
+        var selectedMember = default(MemberItem);
+
+        for (var index = 0; index < orderedMembers.Count; index++)
+        {
+            var member = orderedMembers[index];
+            var nextMemberStartOffset = index + 1 < orderedMembers.Count
+                ? orderedMembers[index + 1].StartOffset
+                : int.MaxValue;
+
+            if (member.StartOffset <= caretOffset && caretOffset < nextMemberStartOffset)
+            {
+                selectedMember = member;
+                break;
+            }
+        }
+
+        if (selectedMember == null || !Members.Contains(selectedMember))
+        {
+            MembersList.SelectedItem = null;
+            return;
+        }
+
+        MembersList.SelectedItem = selectedMember;
+        MembersList.ScrollIntoView(selectedMember);
     }
 
     private void MembersFilterTextBox_TextChanged(object sender, TextChangedEventArgs e)
