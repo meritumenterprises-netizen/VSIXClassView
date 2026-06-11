@@ -12,6 +12,7 @@ namespace VSIXProject1
         public required string Name { get; init; }
         public required string DeclaringClassName { get; init; }
         public required string DisplayText { get; init; }
+        public IReadOnlyList<MemberDisplayPart> DisplayParts { get; init; } = Array.Empty<MemberDisplayPart>();
         public required MemberKind Kind { get; init; }
         public required int StartOffset { get; init; }
         public required int NameStartOffset { get; init; }
@@ -31,5 +32,19 @@ namespace VSIXProject1
             MemberKind.Method => "Methods",
             _ => Kind.ToString()
         };
+    }
+
+    public sealed class MemberDisplayPart
+    {
+        public MemberDisplayPart(string text, bool isBold = false, bool isMemberName = false)
+        {
+            Text = text;
+            IsBold = isBold;
+            IsMemberName = isMemberName;
+        }
+
+        public string Text { get; }
+        public bool IsBold { get; }
+        public bool IsMemberName { get; }
     }
 }

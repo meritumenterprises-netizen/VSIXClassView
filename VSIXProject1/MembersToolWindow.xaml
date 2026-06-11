@@ -27,7 +27,7 @@
                        VerticalAlignment="Center" Grid.ColumnSpan="2" />
             <TextBlock Grid.Column="2"
                        Text="{Binding SelectedClassName}"
-                       FontWeight="SemiBold"
+                       FontWeight="Bold"
                        VerticalAlignment="Center" />
         </Grid>
 
@@ -43,19 +43,30 @@
                  MouseDoubleClick="MembersList_MouseDoubleClick">
             <ListBox.ItemTemplate>
                 <DataTemplate>
-                    <TextBlock Text="{Binding DisplayText}"
+                    <TextBlock Loaded="MemberTextBlock_Loaded"
                                FontSize="{Binding Tag, RelativeSource={RelativeSource AncestorType=ListBox}}" />
                 </DataTemplate>
             </ListBox.ItemTemplate>
             <ListBox.GroupStyle>
                 <GroupStyle>
-                    <GroupStyle.HeaderTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding Name}"
-                                       FontWeight="SemiBold"
-                                       Margin="4,8,4,2" />
-                        </DataTemplate>
-                    </GroupStyle.HeaderTemplate>
+                    <GroupStyle.ContainerStyle>
+                        <Style TargetType="{x:Type GroupItem}">
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="{x:Type GroupItem}">
+                                        <Expander IsExpanded="True">
+                                            <Expander.Header>
+                                                <TextBlock Text="{Binding Name}"
+                                                           FontWeight="SemiBold"
+                                                           Margin="2,8,4,2" />
+                                            </Expander.Header>
+                                            <ItemsPresenter />
+                                        </Expander>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </GroupStyle.ContainerStyle>
                 </GroupStyle>
             </ListBox.GroupStyle>
         </ListBox>

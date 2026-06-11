@@ -1,8 +1,10 @@
 using EnvDTE;
 using EnvDTE80;
 using Microsoft.VisualStudio;
+using Microsoft.VisualStudio.ComponentModelHost;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
+using Microsoft.VisualStudio.Text.Classification;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -61,6 +63,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
 
         _monitorSelection = await _package.GetServiceAsync(typeof(SVsShellMonitorSelection)) as IVsMonitorSelection;
         _runningDocumentTable = await _package.GetServiceAsync(typeof(SVsRunningDocumentTable)) as IVsRunningDocumentTable;
+        await ConfigureMemberNameBrushAsync();
         _runningDocumentTable?.AdviseRunningDocTableEvents(this, out _runningDocumentTableEventsCookie);
         _currentOpenTextEditorTimer = new DispatcherTimer
         {
@@ -70,6 +73,31 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         _currentOpenTextEditorTimer.Start();
 
         Refresh();
+    }
+
+    private async Task ConfigureMemberNameBrushAsync()
+    {
+        await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        try
+        {
+            var componentModel = await _package.GetServiceAsync(typeof(SComponentModel)) as IComponentModel;
+            var classificationRegistry = componentModel?.GetService<IClassificationTypeRegistryService>();
+            var formatMapService = componentModel?.GetService<IClassificationFormatMapService>();
+            var classNameClassification = classificationRegistry?.GetClassificationType("class name");
+
+            if (formatMapService == null || classNameClassification == null)
+            {
+                return;
+            }
+
+            var formatMap = formatMapService.GetClassificationFormatMap("text");
+            _control.SetMemberNameBrush(formatMap.GetTextProperties(classNameClassification).ForegroundBrush);
+        }
+        catch
+        {
+            // Keep the fallback color if Visual Studio classification colors are unavailable.
+        }
     }
 
     private void CurrentOpenTextEditorTimerTick(object sender, EventArgs e)
@@ -236,11 +264,12 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         var editPoint = textDoc.StartPoint.CreateEditPoint();
         var text = editPoint.GetText(textDoc.EndPoint);
         var caretOffset = GetCaretOffset(textDoc);
+        var expandSelectedMemberGroup = ActiveWindowIsCSharpTextEditor();
 
         var classNameAtCaret = MemberScanner.GetClassDisplayNameAtCaret(text, caretOffset);
         if (!force && IsCurrentlyLoaded(doc.FullName, classNameAtCaret))
         {
-            _control.SelectMemberAtOffset(doc.FullName, caretOffset);
+            _control.SelectMemberAtOffset(doc.FullName, caretOffset, expandSelectedMemberGroup);
             return;
         }
 
@@ -249,7 +278,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         _solutionExplorerSelectionOwnsMembersToolWindow = false;
         _control.SetMembers(members);
         SetLoadedSource(members, doc.FullName, classNameAtCaret);
-        _control.SelectMemberAtOffset(doc.FullName, caretOffset);
+        _control.SelectMemberAtOffset(doc.FullName, caretOffset, expandSelectedMemberGroup);
     }
 
     private bool TryRefreshFromSolutionExplorerSelection()
@@ -815,6 +844,15 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         ThreadHelper.ThrowIfNotOnUIThread();
 
         return _dte?.ActiveWindow?.Type == vsWindowType.vsWindowTypeSolutionExplorer;
+    }
+
+    private bool ActiveWindowIsCSharpTextEditor()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var activeWindow = _dte?.ActiveWindow;
+        return activeWindow?.Type == vsWindowType.vsWindowTypeDocument &&
+            DocumentIsCSharpTextEditor(activeWindow.Document);
     }
 
     private Document? GetCurrentOpenCSharpTextEditorDocument()

@@ -151,13 +151,25 @@ namespace VSIXProject1
                 .SelectMany(f => f.Declaration.Variables.Select(v =>
                 {
                     var span = parsedText.Lines.GetLinePositionSpan(v.Identifier.Span);
+                    var fieldType = GetShortTypeName(f.Declaration.Type);
+                    var displayText = FieldIsConst(f)
+                        ? $"{v.Identifier.ValueText} : {fieldType} = {v.Initializer?.Value}"
+                        : $"{v.Identifier.ValueText} : {fieldType}";
                     return new MemberItem
                     {
                         Name = v.Identifier.ValueText,
                         DeclaringClassName = classDisplayName,
-                        DisplayText = FieldIsConst(f)
-                            ? $"{v.Identifier.ValueText} : {GetShortTypeName(f.Declaration.Type)} = {v.Initializer?.Value}"
-                            : $"{v.Identifier.ValueText} : {GetShortTypeName(f.Declaration.Type)}",
+                        DisplayText = displayText,
+                        DisplayParts = FieldIsConst(f)
+                            ? Parts(
+                                (v.Identifier.ValueText, true, true),
+                                (" : ", false, false),
+                                (fieldType, true, false),
+                                ($" = {v.Initializer?.Value}", false, false))
+                            : Parts(
+                                (v.Identifier.ValueText, true, true),
+                                (" : ", false, false),
+                                (fieldType, true, false)),
                         Kind = FieldIsConst(f) ? MemberKind.Const : MemberKind.Field,
                         StartOffset = f.SpanStart,
                         NameStartOffset = v.Identifier.SpanStart,
@@ -176,11 +188,24 @@ namespace VSIXProject1
                 .Select(p =>
                 {
                     var span = parsedText.Lines.GetLinePositionSpan(p.Identifier.Span);
+                    var propertyType = GetShortTypeName(p.Type);
+                    var accessorText = GetPropertyAccessorDisplayText(p);
+                    var displayText = $"{p.Identifier.ValueText} : {propertyType} {accessorText}".TrimEnd();
                     return new MemberItem
                     {
                         Name = p.Identifier.ValueText,
                         DeclaringClassName = classDisplayName,
-                        DisplayText = $"{p.Identifier.ValueText} : {GetShortTypeName(p.Type)} {GetPropertyAccessorDisplayText(p)}".TrimEnd(),
+                        DisplayText = displayText,
+                        DisplayParts = string.IsNullOrEmpty(accessorText)
+                            ? Parts(
+                                (p.Identifier.ValueText, true, true),
+                                (" : ", false, false),
+                                (propertyType, true, false))
+                            : Parts(
+                                (p.Identifier.ValueText, true, true),
+                                (" : ", false, false),
+                                (propertyType, true, false),
+                                ($" {accessorText}", false, false)),
                         Kind = MemberKind.Property,
                         StartOffset = p.SpanStart,
                         NameStartOffset = p.Identifier.SpanStart,
@@ -200,11 +225,18 @@ namespace VSIXProject1
                 .Select(m =>
                 {
                     var span = parsedText.Lines.GetLinePositionSpan(m.Identifier.Span);
+                    var returnType = GetShortTypeName(m.ReturnType);
+                    var methodDisplayName = GetMethodDisplayName(m);
+                    var parameterDisplayParts = GetParameterDisplayParts(m.ParameterList);
                     return new MemberItem
                     {
                         Name = m.Identifier.ValueText,
                         DeclaringClassName = classDisplayName,
-                        DisplayText = $"{GetShortTypeName(m.ReturnType)} : {GetMethodDisplayName(m)} ({GetParameterDisplayText(m.ParameterList)})",
+                        DisplayText = $"{returnType} : {methodDisplayName} ({GetParameterDisplayText(m.ParameterList)})",
+                        DisplayParts = Parts((returnType, true, false), (" : ", false, false), (methodDisplayName, true, true), (" (", false, false))
+                            .Concat(parameterDisplayParts)
+                            .Concat(Parts((")", false, false)))
+                            .ToList(),
                         Kind = MemberKind.Method,
                         StartOffset = m.SpanStart,
                         NameStartOffset = m.Identifier.SpanStart,
@@ -223,11 +255,16 @@ namespace VSIXProject1
                 .Select(c =>
                 {
                     var span = parsedText.Lines.GetLinePositionSpan(c.Identifier.Span);
+                    var parameterDisplayParts = GetParameterDisplayParts(c.ParameterList);
                     return new MemberItem
                     {
                         Name = c.Identifier.ValueText,
                         DeclaringClassName = classDisplayName,
                         DisplayText = $"ctor {c.Identifier.ValueText} ({GetParameterDisplayText(c.ParameterList)})",
+                        DisplayParts = Parts(("ctor ", false, false), (c.Identifier.ValueText, true, true), (" (", false, false))
+                            .Concat(parameterDisplayParts)
+                            .Concat(Parts((")", false, false)))
+                            .ToList(),
                         Kind = MemberKind.Method,
                         StartOffset = c.SpanStart,
                         NameStartOffset = c.Identifier.SpanStart,
@@ -274,6 +311,11 @@ namespace VSIXProject1
                         DisplayText = member.EqualsValue == null
                             ? member.Identifier.ValueText
                             : $"{member.Identifier.ValueText} = {member.EqualsValue.Value}",
+                        DisplayParts = member.EqualsValue == null
+                            ? Parts((member.Identifier.ValueText, true, true))
+                            : Parts(
+                                (member.Identifier.ValueText, true, true),
+                                ($" = {member.EqualsValue.Value}", false, false)),
                         Kind = MemberKind.EnumMember,
                         StartOffset = member.SpanStart,
                         NameStartOffset = member.Identifier.SpanStart,
@@ -300,6 +342,10 @@ namespace VSIXProject1
                 Name = currentClass.Identifier.ValueText,
                 DeclaringClassName = classDisplayName,
                 DisplayText = $"ctor {currentClass.Identifier.ValueText} ({GetParameterDisplayText(currentClass.ParameterList!)})",
+                DisplayParts = Parts(("ctor ", false, false), (currentClass.Identifier.ValueText, true, true), (" (", false, false))
+                    .Concat(GetParameterDisplayParts(currentClass.ParameterList!))
+                    .Concat(Parts((")", false, false)))
+                    .ToList(),
                 Kind = MemberKind.Method,
                 StartOffset = currentClass.SpanStart,
                 NameStartOffset = currentClass.Identifier.SpanStart,
@@ -376,6 +422,32 @@ namespace VSIXProject1
                 ", ",
                 parameterList.Parameters.Select(parameter =>
                     $"{parameter.Identifier.ValueText}: {GetShortTypeName(parameter.Type)}"));
+        }
+
+        private static IReadOnlyList<MemberDisplayPart> GetParameterDisplayParts(ParameterListSyntax parameterList)
+        {
+            var parts = new List<MemberDisplayPart>();
+
+            for (var index = 0; index < parameterList.Parameters.Count; index++)
+            {
+                var parameter = parameterList.Parameters[index];
+                if (index > 0)
+                {
+                    parts.Add(new MemberDisplayPart(", "));
+                }
+
+                parts.Add(new MemberDisplayPart($"{parameter.Identifier.ValueText}: "));
+                parts.Add(new MemberDisplayPart(GetShortTypeName(parameter.Type), isBold: true));
+            }
+
+            return parts;
+        }
+
+        private static IReadOnlyList<MemberDisplayPart> Parts(params (string Text, bool IsBold, bool IsMemberName)[] parts)
+        {
+            return parts
+                .Select(part => new MemberDisplayPart(part.Text, part.IsBold, part.IsMemberName))
+                .ToList();
         }
 
         private static string GetMethodDisplayName(MethodDeclarationSyntax method)
