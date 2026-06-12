@@ -152,9 +152,12 @@ namespace VSIXProject1
                 {
                     var span = parsedText.Lines.GetLinePositionSpan(v.Identifier.Span);
                     var fieldType = GetShortTypeName(f.Declaration.Type);
+                    var initializerText = v.Initializer == null
+                        ? string.Empty
+                        : $" = {v.Initializer.Value}";
                     var displayText = FieldIsConst(f)
                         ? $"{v.Identifier.ValueText} : {fieldType} = {v.Initializer?.Value}"
-                        : $"{v.Identifier.ValueText} : {fieldType}";
+                        : $"{v.Identifier.ValueText} : {fieldType}{initializerText}";
                     return new MemberItem
                     {
                         Name = v.Identifier.ValueText,
@@ -169,7 +172,8 @@ namespace VSIXProject1
                             : Parts(
                                 (v.Identifier.ValueText, true, true),
                                 (" : ", false, false),
-                                (fieldType, true, false)),
+                                (fieldType, true, false),
+                                (initializerText, false, false)),
                         Kind = FieldIsConst(f) ? MemberKind.Const : MemberKind.Field,
                         StartOffset = f.SpanStart,
                         NameStartOffset = v.Identifier.SpanStart,
@@ -190,7 +194,10 @@ namespace VSIXProject1
                     var span = parsedText.Lines.GetLinePositionSpan(p.Identifier.Span);
                     var propertyType = GetShortTypeName(p.Type);
                     var accessorText = GetPropertyAccessorDisplayText(p);
-                    var displayText = $"{p.Identifier.ValueText} : {propertyType} {accessorText}".TrimEnd();
+                    var initializerText = p.Initializer == null
+                        ? string.Empty
+                        : $" = {p.Initializer.Value}";
+                    var displayText = $"{p.Identifier.ValueText} : {propertyType} {accessorText}{initializerText}".TrimEnd();
                     return new MemberItem
                     {
                         Name = p.Identifier.ValueText,
@@ -200,12 +207,14 @@ namespace VSIXProject1
                             ? Parts(
                                 (p.Identifier.ValueText, true, true),
                                 (" : ", false, false),
-                                (propertyType, true, false))
+                                (propertyType, true, false),
+                                (initializerText, false, false))
                             : Parts(
                                 (p.Identifier.ValueText, true, true),
                                 (" : ", false, false),
                                 (propertyType, true, false),
-                                ($" {accessorText}", false, false)),
+                                ($" {accessorText}", false, false),
+                                (initializerText, false, false)),
                         Kind = MemberKind.Property,
                         StartOffset = p.SpanStart,
                         NameStartOffset = p.Identifier.SpanStart,

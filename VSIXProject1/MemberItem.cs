@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.VisualStudio.Imaging;
+using Microsoft.VisualStudio.Imaging.Interop;
 
 namespace VSIXProject1
 {
@@ -22,6 +24,15 @@ namespace VSIXProject1
         public required int NameEndLine { get; init; }
         public required int NameEndColumn { get; init; }
         public string? SourceFilePath { get; init; }
+        public ImageMoniker IconMoniker => Kind switch
+        {
+            MemberKind.Const => KnownMonikers.Constant,
+            MemberKind.Field => KnownMonikers.Field,
+            MemberKind.EnumMember => KnownMonikers.EnumerationItemPublic,
+            MemberKind.Property => KnownMonikers.Property,
+            MemberKind.Method => KnownMonikers.Method,
+            _ => KnownMonikers.Member
+        };
 
         public string GroupHeading => Kind switch
         {
