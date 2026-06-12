@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using VSIXProject1;
 
@@ -18,6 +19,8 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
     private readonly List<MemberItem> _allMembers = new();
     private readonly Dictionary<string, bool> _groupExpandedStates = new(StringComparer.Ordinal);
     private string _selectedClassName = NoClassSelectedText;
+    private string _lastSearchPhrase = string.Empty;
+    private bool _ignoreFilterTextChange;
     private Brush _memberNameBrush = Brushes.Blue;
 
     public ObservableCollection<MemberItem> Members { get; } = new();
@@ -44,6 +47,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
         InitializeComponent();
         DataContext = this;
         Loaded += MembersToolWindowControl_Loaded;
+        PreviewKeyDown += MembersToolWindowControl_PreviewKeyDown;
     }
 
     private void MembersToolWindowControl_Loaded(object sender, RoutedEventArgs e)
@@ -64,7 +68,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
         SelectedClassName = selectedClassName;
         if (selectedClassChanged || selectedSourceChanged)
         {
-            MembersFilterTextBox.Text = string.Empty;
+            SetFilterText(string.Empty, rememberSearchPhrase: false);
         }
 
         ApplyFilter();
@@ -76,8 +80,21 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
         if (!string.Equals(SelectedClassName, selectedClassName, StringComparison.Ordinal))
         {
             SelectedClassName = selectedClassName;
-            MembersFilterTextBox.Text = string.Empty;
+            SetFilterText(string.Empty, rememberSearchPhrase: false);
             ApplyFilter();
+        }
+    }
+
+    private void MembersToolWindowControl_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.F &&
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Control) &&
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Alt))
+        {
+            SetFilterText(_lastSearchPhrase, rememberSearchPhrase: false);
+            MembersFilterTextBox.Focus();
+            MembersFilterTextBox.SelectAll();
+            e.Handled = true;
         }
     }
 
@@ -218,7 +235,31 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
 
     private void MembersFilterTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
+        if (!_ignoreFilterTextChange)
+        {
+            _lastSearchPhrase = MembersFilterTextBox.Text;
+        }
+
         ApplyFilter();
+    }
+
+    private void SetFilterText(string text, bool rememberSearchPhrase)
+    {
+        if (rememberSearchPhrase)
+        {
+            MembersFilterTextBox.Text = text;
+            return;
+        }
+
+        _ignoreFilterTextChange = true;
+        try
+        {
+            MembersFilterTextBox.Text = text;
+        }
+        finally
+        {
+            _ignoreFilterTextChange = false;
+        }
     }
 
     private void ApplyFilter()
@@ -243,6 +284,28 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
         if (MembersList.SelectedItem is MemberItem item)
         {
             MemberDoubleClicked?.Invoke(item);
+        }
+    }
+
+    private void MemberItem_ToolTipOpening(object sender, ToolTipEventArgs e)
+    {
+        if (sender is not StackPanel itemPanel)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        var textBlock = FindVisualChildren<TextBlock>(itemPanel).FirstOrDefault();
+        if (textBlock == null)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        textBlock.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        if (textBlock.DesiredSize.Width <= textBlock.ActualWidth)
+        {
+            e.Handled = true;
         }
     }
 

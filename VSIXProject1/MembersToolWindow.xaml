@@ -64,7 +64,7 @@
                                     <Trigger Property="IsSelected" Value="True">
                                         <Setter TargetName="ItemBorder"
                                                 Property="Background"
-                                                Value="{DynamicResource ListItemBackgroundSelectedBrushKey}" />
+                                                Value="#FFD0D0D0" />
                                         <Setter Property="Foreground"
                                                 Value="{DynamicResource ListItemTextSelectedBrushKey}" />
                                     </Trigger>
@@ -76,7 +76,9 @@
             </ListBox.ItemContainerStyle>
             <ListBox.ItemTemplate>
                 <DataTemplate>
-                    <StackPanel Orientation="Horizontal">
+                    <StackPanel Orientation="Horizontal"
+                                ToolTip="{Binding DisplayText}"
+                                ToolTipOpening="MemberItem_ToolTipOpening">
                         <imaging:CrispImage Moniker="{Binding IconMoniker}"
                                             Width="16"
                                             Height="16"
