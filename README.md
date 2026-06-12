@@ -6,7 +6,7 @@ struct, record or struct record members of the currently open C# class/interface
 
 The extension is supported only for <b>VS.NET 2026</b>.
 
-![Example](VSIXClassView/images/Image1.png)
+![Example](images/Image1.png)
 # Installation
 The extension automatically opens "Class Members" tool window upon installing.  
 
@@ -16,6 +16,7 @@ You can hide it by clicking "x". When you would like to see it again, open "Exte
 When "Class Members" tool window is open, it automatically synchronizes to the currently open C# class.
 
 To filter class members for a phrase, enter the phrase in the text box in the Class Members tool window.
+![Example](images/Image2.png)
 
 # Support
 
