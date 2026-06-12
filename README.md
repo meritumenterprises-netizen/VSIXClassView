@@ -28,4 +28,4 @@ The extension has rudimentary support for VS.NET 2026 themes.
 
 <h2>1.0.0</h2>
 Initial release of the extension
-[1.0.0](VSIXClassView/Releases/1.0.0/VSIXClassView.vsix)
+[1.0.0](https://drive.google.com/uc?export=download&id=1mkqwlqC3isVXNulByAL5zyCh1kM0DmBs)
