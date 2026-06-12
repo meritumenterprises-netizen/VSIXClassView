@@ -19,7 +19,7 @@ To filter class members for a phrase, enter the phrase in the text box in the Cl
 
 # Support
 
-This extension is only available for VS.NET 2026 (all editions). Previous editions of VS.NET are not supported.  
+This extension is only available for VS.NET 2026 (all editions). Previous versions of VS.NET are not supported and their support is not planned.
 
 The extension has rudimentary support for VS.NET 2026 themes.
 
