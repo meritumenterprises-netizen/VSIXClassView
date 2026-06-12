@@ -77,6 +77,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
         }
 
         ApplyFilter();
+        ClearSelectedMember();
     }
 
     public void SetSelectedClassName(string? className)
@@ -87,6 +88,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
             SelectedClassName = selectedClassName;
             SetFilterText(string.Empty, rememberSearchPhrase: false);
             ApplyFilter();
+            ClearSelectedMember();
         }
     }
 
@@ -114,7 +116,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
         RefreshVisibleMemberText();
     }
 
-    public void SelectMemberAtOffset(string sourceFilePath, int caretOffset, bool expandGroup)
+    public MemberItem? SelectMemberAtOffset(string sourceFilePath, int caretOffset, bool expandGroup)
     {
         var orderedMembers = _allMembers
             .Where(member => string.Equals(member.SourceFilePath, sourceFilePath, StringComparison.OrdinalIgnoreCase))
@@ -139,7 +141,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
         if (selectedMember == null || !Members.Contains(selectedMember))
         {
             ClearSelectedMember();
-            return;
+            return null;
         }
 
         if (expandGroup)
@@ -160,6 +162,13 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
         {
             MembersList.ScrollIntoView(selectedMember);
         }
+
+        return selectedMember;
+    }
+
+    public void ClearMemberSelection()
+    {
+        ClearSelectedMember();
     }
 
     private void ExpandGroup(string groupHeading)

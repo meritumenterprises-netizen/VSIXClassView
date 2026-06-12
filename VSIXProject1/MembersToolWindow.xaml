@@ -43,6 +43,7 @@
         <ListBox x:Name="MembersList"
                  Grid.Row="2"
                  ItemsSource="{Binding Source={StaticResource GroupedMembers}}"
+                 IsSynchronizedWithCurrentItem="False"
                  Background="{DynamicResource {x:Static platformUI:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
                  Foreground="{DynamicResource {x:Static platformUI:EnvironmentColors.ToolWindowTextBrushKey}}"
                  MouseDoubleClick="MembersList_MouseDoubleClick">

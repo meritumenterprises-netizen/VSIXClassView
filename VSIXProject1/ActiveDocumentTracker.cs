@@ -32,7 +32,9 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     private string? _loadedClassName;
     private DateTime _lastSolutionExplorerRefreshUtc = DateTime.MinValue;
     private DateTime _suppressEditorRefreshUntilUtc = DateTime.MinValue;
+    private DateTime _suppressCaretSelectionUntilUtc = DateTime.MinValue;
     private bool _solutionExplorerSelectionOwnsMembersToolWindow;
+    private bool _allowCaretSelection;
 
     public ActiveDocumentTracker(
         AsyncPackage package,
@@ -54,8 +56,10 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             return;
         }
 
+        _suppressCaretSelectionUntilUtc = DateTime.UtcNow.AddSeconds(3);
+
         _selectionEvents = _dte.Events.SelectionEvents;
-        _selectionEvents.OnChange += Refresh;
+        _selectionEvents.OnChange += SelectionChanged;
         _documentEvents = _dte.Events.DocumentEvents;
         _documentEvents.DocumentSaved += DocumentSaved;
         _windowEvents = _dte.Events.WindowEvents;
@@ -72,7 +76,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         _currentOpenTextEditorTimer.Tick += CurrentOpenTextEditorTimerTick;
         _currentOpenTextEditorTimer.Start();
 
-        Refresh();
+        Refresh(selectFromCaret: false);
     }
 
     private async Task ConfigureMemberNameBrushAsync()
@@ -119,7 +123,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             var currentOpenTextEditorDocument = GetCurrentOpenCSharpTextEditorDocument();
             if (currentOpenTextEditorDocument != null)
             {
-                RefreshFromDocument(currentOpenTextEditorDocument);
+                RefreshFromDocument(currentOpenTextEditorDocument, selectFromCaret: _allowCaretSelection);
             }
         }
         catch
@@ -147,11 +151,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             var currentOpenTextEditorDocument = GetCurrentOpenCSharpTextEditorDocument();
             if (currentOpenTextEditorDocument != null)
             {
-                RefreshFromDocument(currentOpenTextEditorDocument, force: true);
+                RefreshFromDocument(currentOpenTextEditorDocument, force: true, selectFromCaret: false);
                 return;
             }
 
-            RefreshFromDocument(_dte?.ActiveDocument);
+            RefreshFromDocument(_dte?.ActiveDocument, selectFromCaret: false);
         }
         catch
         {
@@ -165,7 +169,9 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
 
         _currentOpenTextEditorDocument = null;
         _suppressEditorRefreshUntilUtc = DateTime.MinValue;
+        _suppressCaretSelectionUntilUtc = DateTime.MinValue;
         _solutionExplorerSelectionOwnsMembersToolWindow = false;
+        _allowCaretSelection = false;
         ClearLoadedSource();
         _control.SetMembers(Array.Empty<MemberItem>());
     }
@@ -178,7 +184,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         {
             if (document.FullName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
             {
-                RefreshFromDocument(document, force: true);
+                RefreshFromDocument(document, force: true, selectFromCaret: _allowCaretSelection);
             }
         }
         catch
@@ -195,13 +201,43 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             DocumentIsCSharpTextEditor(focusedDocument))
         {
             _solutionExplorerSelectionOwnsMembersToolWindow = false;
+            if (!CaretSelectionIsSuppressed())
+            {
+                _allowCaretSelection = true;
+            }
         }
 
         RememberCurrentOpenTextEditorDocument(focusedDocument);
-        RefreshDocumentSoon(focusedDocument, force: true);
+        RefreshDocumentSoon(focusedDocument, force: true, selectFromCaret: _allowCaretSelection);
+    }
+
+    private void SelectionChanged()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (ActiveWindowIsCSharpTextEditor())
+        {
+            if (CaretSelectionIsSuppressed())
+            {
+                Refresh(selectFromCaret: false);
+                return;
+            }
+
+            _allowCaretSelection = true;
+            Refresh(selectFromCaret: true);
+            return;
+        }
+
+        Refresh(selectFromCaret: false);
     }
 
     private void Refresh()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        Refresh(selectFromCaret: _allowCaretSelection);
+    }
+
+    private void Refresh(bool selectFromCaret)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -220,11 +256,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             var currentOpenTextEditorDocument = GetCurrentOpenCSharpTextEditorDocument();
             if (currentOpenTextEditorDocument != null)
             {
-                RefreshFromDocument(currentOpenTextEditorDocument, force: true);
+                RefreshFromDocument(currentOpenTextEditorDocument, force: true, selectFromCaret: selectFromCaret);
                 return;
             }
 
-            RefreshFromDocument(_dte?.ActiveDocument);
+            RefreshFromDocument(_dte?.ActiveDocument, selectFromCaret: selectFromCaret);
         }
         catch
         {
@@ -232,7 +268,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         }
     }
 
-    private void RefreshFromDocument(Document? doc, bool force = false)
+    private void RefreshFromDocument(Document? doc, bool force = false, bool selectFromCaret = false)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -264,12 +300,20 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         var editPoint = textDoc.StartPoint.CreateEditPoint();
         var text = editPoint.GetText(textDoc.EndPoint);
         var caretOffset = GetCaretOffset(textDoc);
-        var expandSelectedMemberGroup = ActiveWindowIsCSharpTextEditor();
+        var selectMemberFromCaret = selectFromCaret && ActiveWindowIsCSharpTextEditor();
 
         var classNameAtCaret = MemberScanner.GetClassDisplayNameAtCaret(text, caretOffset);
         if (!force && IsCurrentlyLoaded(doc.FullName, classNameAtCaret))
         {
-            _control.SelectMemberAtOffset(doc.FullName, caretOffset, expandSelectedMemberGroup);
+            if (selectMemberFromCaret)
+            {
+                _control.SelectMemberAtOffset(doc.FullName, caretOffset, expandGroup: true);
+            }
+            else
+            {
+                _control.ClearMemberSelection();
+            }
+
             return;
         }
 
@@ -278,7 +322,10 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         _solutionExplorerSelectionOwnsMembersToolWindow = false;
         _control.SetMembers(members);
         SetLoadedSource(members, doc.FullName, classNameAtCaret);
-        _control.SelectMemberAtOffset(doc.FullName, caretOffset, expandSelectedMemberGroup);
+        if (selectMemberFromCaret)
+        {
+            _control.SelectMemberAtOffset(doc.FullName, caretOffset, expandGroup: true);
+        }
     }
 
     private bool TryRefreshFromSolutionExplorerSelection()
@@ -370,6 +417,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         return DateTime.UtcNow < _suppressEditorRefreshUntilUtc
             && !string.IsNullOrEmpty(_loadedSourceFilePath)
             && !string.Equals(_loadedSourceFilePath, sourceFilePath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool CaretSelectionIsSuppressed()
+    {
+        return DateTime.UtcNow < _suppressCaretSelectionUntilUtc;
     }
 
     private void SuppressEditorRefreshForFocusHandoff(bool suppress)
@@ -816,6 +868,21 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         }
     }
 
+    private static void RevealMemberName(TextDocument textDoc, MemberItem item)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        try
+        {
+            var point = textDoc.StartPoint.CreateEditPoint();
+            point.MoveToLineAndOffset(item.NameStartLine + 1, item.NameStartColumn + 1);
+            point.TryToShow(vsPaneShowHow.vsPaneShowCentered);
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+        }
+    }
+
     private bool ActiveWindowIsDesigner()
     {
         ThreadHelper.ThrowIfNotOnUIThread();
@@ -962,7 +1029,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     public int OnAfterSave(uint docCookie)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        RefreshActiveDocumentSoon(force: true);
+        RefreshActiveDocumentSoon(force: true, selectFromCaret: _allowCaretSelection);
         return VSConstants.S_OK;
     }
 
@@ -971,7 +1038,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         ThreadHelper.ThrowIfNotOnUIThread();
         var document = GetDocumentFromFrame(pFrame);
         RememberCurrentOpenTextEditorDocument(document);
-        RefreshDocumentSoon(document, force: true);
+        RefreshDocumentSoon(document, force: true, selectFromCaret: false);
         return VSConstants.S_OK;
     }
 
@@ -984,7 +1051,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         return VSConstants.S_OK;
     }
 
-    private void RefreshActiveDocumentSoon(bool force = false)
+    private void RefreshActiveDocumentSoon(bool force = false, bool selectFromCaret = false)
     {
         _package.JoinableTaskFactory
             .RunAsync(async () =>
@@ -1000,7 +1067,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                 var currentOpenTextEditorDocument = GetCurrentOpenCSharpTextEditorDocument();
                 if (currentOpenTextEditorDocument != null)
                 {
-                    RefreshFromDocument(currentOpenTextEditorDocument, force: true);
+                    RefreshFromDocument(currentOpenTextEditorDocument, force: true, selectFromCaret: selectFromCaret);
                     return;
                 }
 
@@ -1008,7 +1075,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                 {
                     try
                     {
-                        RefreshFromDocument(_dte?.ActiveDocument, force: true);
+                        RefreshFromDocument(_dte?.ActiveDocument, force: true, selectFromCaret: selectFromCaret);
                     }
                     catch
                     {
@@ -1023,7 +1090,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             .FileAndForget("VSIXProject1/RefreshActiveDocumentSoon");
     }
 
-    private void RefreshDocumentSoon(Document? document, bool force = false)
+    private void RefreshDocumentSoon(Document? document, bool force = false, bool selectFromCaret = false)
     {
         _package.JoinableTaskFactory
             .RunAsync(async () =>
@@ -1039,13 +1106,13 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                 var currentOpenTextEditorDocument = GetCurrentOpenCSharpTextEditorDocument();
                 if (currentOpenTextEditorDocument != null)
                 {
-                    RefreshFromDocument(currentOpenTextEditorDocument, force: true);
+                    RefreshFromDocument(currentOpenTextEditorDocument, force: true, selectFromCaret: selectFromCaret);
                     return;
                 }
 
                 try
                 {
-                    RefreshFromDocument(document, force);
+                    RefreshFromDocument(document, force, selectFromCaret);
                 }
                 catch
                 {
@@ -1069,7 +1136,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                 }
 
                 var document = GetDocumentFromFrame(frame) ?? _dte?.ActiveDocument;
-                RefreshFromDocument(document, force: true);
+                RefreshFromDocument(document, force: true, selectFromCaret: false);
             })
             .FileAndForget("VSIXProject1/RefreshDocumentWindowSoon");
     }
