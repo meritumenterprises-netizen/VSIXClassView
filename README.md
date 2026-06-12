@@ -10,17 +10,18 @@ The extension is supported only for <b>VS.NET 2026</b>.
 # Installation
 The extension automatically opens "Class Members" tool window upon installing.  
 
-You can hide it by clicking "x". When you would like to see it again, open "Extensions/Class Members/Show Class Members" menu item.
+You can hide it by clicking "x". When you would like to see it again, open <b>"Extensions/Class Members/Show Class Members"</b> menu item from the IDE.
 
 # Use
 When "Class Members" tool window is open, it automatically synchronizes to the currently open C# class.
 
 To filter class members for a phrase, enter the phrase in the text box in the Class Members tool window.
+
 ![Example](images/Image2.png)
 
 # Support
 
-This extension is only available for VS.NET 2026 (all editions). Previous editions of VS.NET are not supported.  
+This extension is only available for VS.NET 2026 (all editions). Previous versions of VS.NET are not supported.  
 
 The extension has rudimentary support for VS.NET 2026 themes.
 
