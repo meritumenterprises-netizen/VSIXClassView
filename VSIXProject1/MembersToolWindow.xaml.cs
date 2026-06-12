@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Input;
@@ -22,6 +23,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
     private string _lastSearchPhrase = string.Empty;
     private bool _ignoreFilterTextChange;
     private Brush _memberNameBrush = Brushes.Blue;
+    private MemberItem? _manualScrollSuppressedMember;
 
     public ObservableCollection<MemberItem> Members { get; } = new();
     public string SelectedClassName
@@ -48,6 +50,8 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
         DataContext = this;
         Loaded += MembersToolWindowControl_Loaded;
         PreviewKeyDown += MembersToolWindowControl_PreviewKeyDown;
+        MembersList.PreviewMouseWheel += MembersList_PreviewManualScroll;
+        MembersList.PreviewMouseDown += MembersList_PreviewMouseDown;
     }
 
     private void MembersToolWindowControl_Loaded(object sender, RoutedEventArgs e)
@@ -58,6 +62,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
     public void SetMembers(IEnumerable<MemberItem> members)
     {
         var previousSourceFilePath = _allMembers.FirstOrDefault()?.SourceFilePath;
+        ClearSelectedMember();
         _allMembers.Clear();
         _allMembers.AddRange(members);
         var selectedClassName = _allMembers.FirstOrDefault()?.DeclaringClassName ?? NoClassSelectedText;
@@ -133,7 +138,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
 
         if (selectedMember == null || !Members.Contains(selectedMember))
         {
-            MembersList.SelectedItem = null;
+            ClearSelectedMember();
             return;
         }
 
@@ -142,8 +147,16 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
             ExpandGroup(selectedMember.GroupHeading);
         }
 
+        var selectedItemChanged = !ReferenceEquals(MembersList.SelectedItem, selectedMember);
+        if (selectedItemChanged)
+        {
+            _manualScrollSuppressedMember = null;
+        }
+
         MembersList.SelectedItem = selectedMember;
-        if (expandGroup)
+        if (expandGroup &&
+            (selectedItemChanged ||
+                (!ReferenceEquals(_manualScrollSuppressedMember, selectedMember) && !IsItemVisible(selectedMember))))
         {
             MembersList.ScrollIntoView(selectedMember);
         }
@@ -212,6 +225,11 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
     private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent)
         where T : DependencyObject
     {
+        if (!IsVisual(parent))
+        {
+            yield break;
+        }
+
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
         {
             var child = VisualTreeHelper.GetChild(parent, index);
@@ -231,6 +249,33 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
         where T : DependencyObject
     {
         return FindVisualChildren<T>(parent).FirstOrDefault();
+    }
+
+    private static T? FindVisualParent<T>(DependencyObject child)
+        where T : DependencyObject
+    {
+        if (!IsVisual(child))
+        {
+            return null;
+        }
+
+        var parent = VisualTreeHelper.GetParent(child);
+        while (parent != null)
+        {
+            if (parent is T typedParent)
+            {
+                return typedParent;
+            }
+
+            parent = VisualTreeHelper.GetParent(parent);
+        }
+
+        return null;
+    }
+
+    private static bool IsVisual(DependencyObject dependencyObject)
+    {
+        return dependencyObject is Visual || dependencyObject is System.Windows.Media.Media3D.Visual3D;
     }
 
     private void MembersFilterTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -283,8 +328,59 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
     {
         if (MembersList.SelectedItem is MemberItem item)
         {
+            SelectAndRevealMember(item);
             MemberDoubleClicked?.Invoke(item);
+            SelectAndRevealMember(item);
         }
+    }
+
+    private void SelectAndRevealMember(MemberItem item)
+    {
+        MembersList.SelectedItem = item;
+        MembersList.ScrollIntoView(item);
+    }
+
+    private void ClearSelectedMember()
+    {
+        MembersList.SelectedItem = null;
+        _manualScrollSuppressedMember = null;
+    }
+
+    private void MembersList_PreviewManualScroll(object sender, MouseWheelEventArgs e)
+    {
+        SuppressAutoScrollForCurrentSelection();
+    }
+
+    private void MembersList_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject source &&
+            FindVisualParent<ScrollBar>(source) != null)
+        {
+            SuppressAutoScrollForCurrentSelection();
+        }
+    }
+
+    private void SuppressAutoScrollForCurrentSelection()
+    {
+        if (MembersList.SelectedItem is MemberItem item)
+        {
+            _manualScrollSuppressedMember = item;
+        }
+    }
+
+    private bool IsItemVisible(MemberItem item)
+    {
+        if (MembersList.ItemContainerGenerator.ContainerFromItem(item) is not FrameworkElement itemContainer)
+        {
+            return false;
+        }
+
+        var itemBounds = itemContainer
+            .TransformToAncestor(MembersList)
+            .TransformBounds(new Rect(new Point(0, 0), itemContainer.RenderSize));
+        var listBounds = new Rect(new Point(0, 0), MembersList.RenderSize);
+
+        return listBounds.Contains(itemBounds.TopLeft) && listBounds.Contains(itemBounds.BottomRight);
     }
 
     private void MemberItem_ToolTipOpening(object sender, ToolTipEventArgs e)
