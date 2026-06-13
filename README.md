@@ -31,4 +31,4 @@ The extension has rudimentary support for VS.NET 2026 themes.
 
 
 Initial release of the extension
-[1.0.0](VSIXClassView/Releases/1.0.1/VSIXClassView.vsix)
+[1.0.0](https://raw.githubusercontent.com/meritumenterprises-netizen/VSIXClassView/master/Releases/1.0.0/VSIXClassView.vsix)
