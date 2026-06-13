@@ -110,6 +110,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
 
         try
         {
+            if (MembersToolWindowHasFocus())
+            {
+                return;
+            }
+
             if (ActiveWindowIsSolutionExplorer())
             {
                 return;
@@ -128,7 +133,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         }
         catch
         {
-            _control.SetMembers(Array.Empty<MemberItem>());
+            ClearMembersUnlessDesignerIsLoading();
         }
     }
 
@@ -159,7 +164,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         }
         catch
         {
-            _control.SetMembers(Array.Empty<MemberItem>());
+            ClearMembersUnlessDesignerIsLoading();
         }
     }
 
@@ -189,13 +194,18 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         }
         catch
         {
-            _control.SetMembers(Array.Empty<MemberItem>());
+            ClearMembersUnlessDesignerIsLoading();
         }
     }
 
     private void WindowActivated(Window gotFocus, Window lostFocus)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
+        if (MembersToolWindowHasFocus())
+        {
+            return;
+        }
+
         var focusedDocument = GetCurrentDocumentFrameDocument() ?? gotFocus.Document;
         if (gotFocus.Type == vsWindowType.vsWindowTypeDocument &&
             DocumentIsCSharpTextEditor(focusedDocument))
@@ -214,6 +224,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     private void SelectionChanged()
     {
         ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (MembersToolWindowHasFocus())
+        {
+            return;
+        }
 
         if (ActiveWindowIsCSharpTextEditor())
         {
@@ -243,6 +258,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
 
         try
         {
+            if (MembersToolWindowHasFocus())
+            {
+                return;
+            }
+
             if (ActiveWindowIsSolutionExplorer())
             {
                 return;
@@ -264,7 +284,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         }
         catch
         {
-            _control.SetMembers(Array.Empty<MemberItem>());
+            ClearMembersUnlessDesignerIsLoading();
         }
     }
 
@@ -274,8 +294,12 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
 
         if (doc == null || !doc.FullName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
         {
-            _control.SetMembers(Array.Empty<MemberItem>());
-            ClearLoadedSource();
+            if (ActiveWindowIsDesigner())
+            {
+                return;
+            }
+
+            ClearMembersUnlessDesignerIsLoading();
             return;
         }
 
@@ -377,30 +401,33 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             return false;
         }
 
-        var filePath = _dte?.ActiveDocument?.FullName;
+        var filePath = _dte?.ActiveWindow?.Document?.FullName ?? _dte?.ActiveDocument?.FullName;
         if (string.IsNullOrEmpty(filePath))
         {
-            return false;
+            return true;
         }
 
         var designerSourceFilePath = filePath!;
         if (!designerSourceFilePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) ||
             !File.Exists(designerSourceFilePath))
         {
-            return false;
+            return true;
         }
 
         var sourceText = File.ReadAllText(designerSourceFilePath);
         var preferredClassName = Path.GetFileNameWithoutExtension(designerSourceFilePath);
         var classDisplayName = MemberScanner.GetClassDisplayNameForClassNameOrFirst(sourceText, preferredClassName);
+        _allowCaretSelection = false;
         if (IsCurrentlyLoaded(designerSourceFilePath, classDisplayName))
         {
+            _control.ClearMemberSelection();
             return true;
         }
 
         var members = MemberScanner.GetMembersForClassNameOrFirst(sourceText, preferredClassName, designerSourceFilePath);
         _control.SetMembers(members);
         SetLoadedSource(members, designerSourceFilePath, classDisplayName);
+        _control.ClearMemberSelection();
 
         return true;
     }
@@ -422,6 +449,41 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     private bool CaretSelectionIsSuppressed()
     {
         return DateTime.UtcNow < _suppressCaretSelectionUntilUtc;
+    }
+
+    private bool MembersToolWindowHasFocus()
+    {
+        return _control.HasMemberListFocus();
+    }
+
+    private void ClearMembersUnlessDesignerIsLoading()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (ShouldPreserveMembersForDesignerLoad())
+        {
+            _control.ClearMemberSelection();
+            return;
+        }
+
+        _control.SetMembers(Array.Empty<MemberItem>());
+        ClearLoadedSource();
+    }
+
+    private bool ShouldPreserveMembersForDesignerLoad()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        return !string.IsNullOrEmpty(_loadedSourceFilePath) && ActiveWindowLooksLikeDesignerOrLoading();
+    }
+
+    private bool ActiveWindowLooksLikeDesignerOrLoading()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var activeWindow = _dte?.ActiveWindow;
+        return activeWindow?.Type == vsWindowType.vsWindowTypeDocument &&
+            WindowLooksLikeDesigner(activeWindow.Kind, activeWindow.Caption);
     }
 
     private void SuppressEditorRefreshForFocusHandoff(bool suppress)
@@ -797,6 +859,8 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
+        _allowCaretSelection = true;
+
         var doc = GetTextViewDocument(item);
         if (doc == null)
         {
@@ -887,23 +951,21 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var activeWindow = _dte?.ActiveWindow;
-        if (activeWindow == null || activeWindow.Type != vsWindowType.vsWindowTypeDocument)
-        {
-            return false;
-        }
+        return ActiveWindowLooksLikeDesignerOrLoading();
+    }
 
-        var kind = activeWindow.Kind ?? string.Empty;
-        var caption = activeWindow.Caption ?? string.Empty;
+    private static bool WindowLooksLikeDesigner(string? kind, string? caption)
+    {
+        var windowKind = kind ?? string.Empty;
+        var windowCaption = caption ?? string.Empty;
 
-        if (DocumentIsCSharpTextEditor(activeWindow.Document))
-        {
-            return false;
-        }
-
-        return kind.IndexOf("Designer", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            caption.EndsWith(" [Design]", StringComparison.OrdinalIgnoreCase) ||
-            caption.EndsWith(" (Design)", StringComparison.OrdinalIgnoreCase);
+        return windowKind.IndexOf("Designer", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            windowCaption.IndexOf("Designer", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            windowCaption.IndexOf("Loading Designer", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            (windowCaption.IndexOf("Loading", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                windowCaption.IndexOf("Design", StringComparison.OrdinalIgnoreCase) >= 0) ||
+            windowCaption.EndsWith(" [Design]", StringComparison.OrdinalIgnoreCase) ||
+            windowCaption.EndsWith(" (Design)", StringComparison.OrdinalIgnoreCase);
     }
 
     private bool ActiveWindowIsSolutionExplorer()
@@ -1038,7 +1100,15 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         ThreadHelper.ThrowIfNotOnUIThread();
         var document = GetDocumentFromFrame(pFrame);
         RememberCurrentOpenTextEditorDocument(document);
-        RefreshDocumentSoon(document, force: true, selectFromCaret: false);
+        if (IsDesignerFrame(pFrame))
+        {
+            RefreshDocumentWindowSoon(pFrame);
+        }
+        else
+        {
+            RefreshDocumentSoon(document, force: true, selectFromCaret: false);
+        }
+
         return VSConstants.S_OK;
     }
 
@@ -1058,6 +1128,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             {
                 await System.Threading.Tasks.Task.Delay(100);
                 await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                if (MembersToolWindowHasFocus())
+                {
+                    return;
+                }
 
                 if (TryRefreshFromActiveDesigner())
                 {
@@ -1079,7 +1154,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                     }
                     catch
                     {
-                        _control.SetMembers(Array.Empty<MemberItem>());
+                        ClearMembersUnlessDesignerIsLoading();
                     }
                 }
                 else
@@ -1097,6 +1172,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             {
                 await System.Threading.Tasks.Task.Delay(100);
                 await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                if (MembersToolWindowHasFocus())
+                {
+                    return;
+                }
 
                 if (TryRefreshFromActiveDesigner())
                 {
@@ -1116,7 +1196,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                 }
                 catch
                 {
-                    _control.SetMembers(Array.Empty<MemberItem>());
+                    ClearMembersUnlessDesignerIsLoading();
                 }
             })
             .FileAndForget("VSIXProject1/RefreshDocumentSoon");
@@ -1130,6 +1210,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                 await System.Threading.Tasks.Task.Delay(100);
                 await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
 
+                if (MembersToolWindowHasFocus())
+                {
+                    return;
+                }
+
                 if (TryRefreshFromActiveDesigner())
                 {
                     return;
@@ -1139,6 +1224,27 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                 RefreshFromDocument(document, force: true, selectFromCaret: false);
             })
             .FileAndForget("VSIXProject1/RefreshDocumentWindowSoon");
+    }
+
+    private static bool IsDesignerFrame(IVsWindowFrame frame)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        try
+        {
+            if (Microsoft.VisualStudio.ErrorHandler.Succeeded(
+                    frame.GetProperty((int)__VSFPROPID.VSFPROPID_Caption, out var captionObject)) &&
+                captionObject is string caption &&
+                WindowLooksLikeDesigner(kind: null, caption))
+            {
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
     }
 
     private static Document? GetDocumentFromFrame(IVsWindowFrame frame)

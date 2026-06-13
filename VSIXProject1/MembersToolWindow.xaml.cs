@@ -62,7 +62,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
     public void SetMembers(IEnumerable<MemberItem> members)
     {
         var previousSourceFilePath = _allMembers.FirstOrDefault()?.SourceFilePath;
-        ClearSelectedMember();
+        var previouslySelectedMember = MembersList.SelectedItem as MemberItem;
         _allMembers.Clear();
         _allMembers.AddRange(members);
         var selectedClassName = _allMembers.FirstOrDefault()?.DeclaringClassName ?? NoClassSelectedText;
@@ -77,7 +77,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
         }
 
         ApplyFilter();
-        ClearSelectedMember();
+        RestoreSelectedMember(previouslySelectedMember);
     }
 
     public void SetSelectedClassName(string? className)
@@ -169,6 +169,11 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
     public void ClearMemberSelection()
     {
         ClearSelectedMember();
+    }
+
+    public bool HasMemberListFocus()
+    {
+        return IsKeyboardFocusWithin || MembersList.IsKeyboardFocusWithin;
     }
 
     private void ExpandGroup(string groupHeading)
@@ -349,6 +354,34 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
         MembersList.ScrollIntoView(item);
     }
 
+    private void RestoreSelectedMember(MemberItem? previousMember)
+    {
+        if (previousMember == null)
+        {
+            ClearSelectedMember();
+            return;
+        }
+
+        var matchingMember = Members.FirstOrDefault(member => MemberMatches(member, previousMember));
+        if (matchingMember == null)
+        {
+            ClearSelectedMember();
+            return;
+        }
+
+        MembersList.SelectedItem = matchingMember;
+    }
+
+    private static bool MemberMatches(MemberItem member, MemberItem other)
+    {
+        return member.Kind == other.Kind &&
+            member.StartOffset == other.StartOffset &&
+            member.NameStartLine == other.NameStartLine &&
+            member.NameStartColumn == other.NameStartColumn &&
+            string.Equals(member.Name, other.Name, StringComparison.Ordinal) &&
+            string.Equals(member.SourceFilePath, other.SourceFilePath, StringComparison.OrdinalIgnoreCase);
+    }
+
     private void ClearSelectedMember()
     {
         MembersList.SelectedItem = null;
@@ -394,21 +427,35 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
 
     private void MemberItem_ToolTipOpening(object sender, ToolTipEventArgs e)
     {
-        if (sender is not StackPanel itemPanel)
+        var itemContainer = sender as ListBoxItem;
+        var itemPanel = itemContainer == null
+            ? sender as StackPanel
+            : FindVisualChild<StackPanel>(itemContainer);
+
+        if (itemPanel == null)
         {
             e.Handled = true;
             return;
         }
 
-        var textBlock = FindVisualChildren<TextBlock>(itemPanel).FirstOrDefault();
-        if (textBlock == null)
+        var scrollViewer = FindVisualChild<ScrollViewer>(MembersList);
+        var availableWidth = scrollViewer?.ViewportWidth > 0
+            ? scrollViewer.ViewportWidth
+            : MembersList.ActualWidth;
+
+        if (itemContainer != null)
+        {
+            availableWidth -= itemContainer.Padding.Left + itemContainer.Padding.Right;
+        }
+
+        if (availableWidth <= 0)
         {
             e.Handled = true;
             return;
         }
 
-        textBlock.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        if (textBlock.DesiredSize.Width <= textBlock.ActualWidth)
+        itemPanel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        if (itemPanel.DesiredSize.Width <= availableWidth)
         {
             e.Handled = true;
         }
