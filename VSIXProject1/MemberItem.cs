@@ -10,10 +10,17 @@ namespace VSIXProject1
 {
     public sealed class MemberItem
     {
+        private string? _tooltipText;
+
         public MemberItem() { }
         public required string Name { get; init; }
         public required string DeclaringClassName { get; init; }
         public required string DisplayText { get; init; }
+        public string TooltipText
+        {
+            get => string.IsNullOrEmpty(_tooltipText) ? DisplayText : _tooltipText!;
+            init => _tooltipText = value;
+        }
         public IReadOnlyList<MemberDisplayPart> DisplayParts { get; init; } = Array.Empty<MemberDisplayPart>();
         public required MemberKind Kind { get; init; }
         public required int StartOffset { get; init; }
@@ -26,6 +33,7 @@ namespace VSIXProject1
         public string? SourceFilePath { get; init; }
         public ImageMoniker IconMoniker => Kind switch
         {
+            MemberKind.Region => KnownMonikers.Namespace,
             MemberKind.Const => KnownMonikers.Constant,
             MemberKind.Field => KnownMonikers.Field,
             MemberKind.EnumMember => KnownMonikers.EnumerationItemPublic,
@@ -36,6 +44,7 @@ namespace VSIXProject1
 
         public string GroupHeading => Kind switch
         {
+            MemberKind.Region => "Regions",
             MemberKind.Const => "Const",
             MemberKind.Field => "Fields",
             MemberKind.EnumMember => "Members",

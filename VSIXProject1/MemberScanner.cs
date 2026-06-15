@@ -134,9 +134,13 @@ namespace VSIXProject1
             SourceText parsedText,
             string? sourceFilePath)
         {
+            var regions = GetRegions(currentType, parsedText, sourceFilePath);
+
             if (currentType is EnumDeclarationSyntax currentEnum)
             {
-                return GetMembersForEnum(currentEnum, parsedText, sourceFilePath);
+                return regions
+                    .Concat(GetMembersForEnum(currentEnum, parsedText, sourceFilePath))
+                    .ToList();
             }
 
             if (!(currentType is TypeDeclarationSyntax currentTypeDeclaration))
@@ -295,11 +299,113 @@ namespace VSIXProject1
                 }
                 : Enumerable.Empty<MemberItem>();
 
-            return fields
+            return regions
+                .Concat(fields)
                 .Concat(properties)
                 .Concat(primaryConstructor.Concat(constructors).OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
                 .Concat(methods)
                 .ToList();
+        }
+
+        private static IReadOnlyList<MemberItem> GetRegions(
+            BaseTypeDeclarationSyntax currentType,
+            SourceText parsedText,
+            string? sourceFilePath)
+        {
+            var classDisplayName = GetTypeDisplayName(currentType);
+            var regionStack = new Stack<RegionDirectiveTriviaSyntax>();
+            var regions = new List<MemberItem>();
+
+            foreach (var directive in currentType.SyntaxTree
+                .GetCompilationUnitRoot()
+                .DescendantTrivia(descendIntoTrivia: true)
+                .Select(trivia => trivia.GetStructure())
+                .OfType<DirectiveTriviaSyntax>()
+                .OrderBy(directive => directive.SpanStart))
+            {
+                if (directive is RegionDirectiveTriviaSyntax regionDirective)
+                {
+                    regionStack.Push(regionDirective);
+                    continue;
+                }
+
+                if (directive is EndRegionDirectiveTriviaSyntax endRegionDirective &&
+                    regionStack.Count > 0)
+                {
+                    var matchingRegionDirective = regionStack.Pop();
+                    regions.Add(CreateRegionItem(
+                        matchingRegionDirective,
+                        endRegionDirective,
+                        classDisplayName,
+                        parsedText,
+                        sourceFilePath));
+                }
+            }
+
+            return regions
+                .OrderBy(region => region.StartOffset)
+                .ToList();
+        }
+
+        private static MemberItem CreateRegionItem(
+            RegionDirectiveTriviaSyntax regionDirective,
+            EndRegionDirectiveTriviaSyntax endRegionDirective,
+            string classDisplayName,
+            SourceText parsedText,
+            string? sourceFilePath)
+        {
+            var regionLine = parsedText.Lines.GetLineFromPosition(regionDirective.HashToken.SpanStart);
+            var endRegionLine = parsedText.Lines.GetLineFromPosition(endRegionDirective.HashToken.SpanStart);
+            var regionName = GetRegionName(regionLine.ToString());
+            var regionContentStart = Math.Min(regionLine.EndIncludingLineBreak, parsedText.Length);
+            var regionContentEnd = Math.Max(regionContentStart, endRegionLine.Start);
+            var regionContent = parsedText.ToString(TextSpan.FromBounds(regionContentStart, regionContentEnd)).Trim();
+            var tooltipText = LimitLines(regionContent, maxLines: 15);
+            var displayText = string.IsNullOrWhiteSpace(regionName)
+                ? "Region"
+                : $"Region {regionName}";
+            var nameStartOffset = regionLine.Start;
+            var nameLength = Math.Max(1, regionLine.End - regionLine.Start);
+            var span = parsedText.Lines.GetLinePositionSpan(TextSpan.FromBounds(nameStartOffset, nameStartOffset + nameLength));
+
+            return new MemberItem
+            {
+                Name = regionName,
+                DeclaringClassName = classDisplayName,
+                DisplayText = displayText,
+                TooltipText = string.IsNullOrEmpty(tooltipText) ? displayText : tooltipText,
+                DisplayParts = string.IsNullOrWhiteSpace(regionName)
+                    ? Parts(("Region", true, true))
+                    : Parts(("Region ", false, false), (regionName, true, true)),
+                Kind = MemberKind.Region,
+                StartOffset = regionDirective.SpanStart,
+                NameStartOffset = nameStartOffset,
+                NameLength = nameLength,
+                NameStartLine = span.Start.Line,
+                NameStartColumn = span.Start.Character,
+                NameEndLine = span.End.Line,
+                NameEndColumn = span.End.Character,
+                SourceFilePath = sourceFilePath
+            };
+        }
+
+        private static string GetRegionName(string regionLine)
+        {
+            var regionIndex = regionLine.IndexOf("#region", StringComparison.Ordinal);
+            return regionIndex < 0
+                ? string.Empty
+                : regionLine.Substring(regionIndex + "#region".Length).Trim();
+        }
+
+        private static string LimitLines(string text, int maxLines)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+
+            var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            return string.Join(Environment.NewLine, lines.Take(maxLines));
         }
 
         private static IReadOnlyList<MemberItem> GetMembersForEnum(

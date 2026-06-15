@@ -24,6 +24,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
     private bool _ignoreFilterTextChange;
     private Brush _memberNameBrush = Brushes.Blue;
     private MemberItem? _manualScrollSuppressedMember;
+    private DateTime _manualListInteractionUntilUtc = DateTime.MinValue;
 
     public ObservableCollection<MemberItem> Members { get; } = new();
     public string SelectedClassName
@@ -157,6 +158,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
 
         MembersList.SelectedItem = selectedMember;
         if (expandGroup &&
+            !UserIsInteractingWithList() &&
             (selectedItemChanged ||
                 (!ReferenceEquals(_manualScrollSuppressedMember, selectedMember) && !IsItemVisible(selectedMember))))
         {
@@ -173,7 +175,11 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
 
     public bool HasMemberListFocus()
     {
-        return IsKeyboardFocusWithin || MembersList.IsKeyboardFocusWithin;
+        return IsKeyboardFocusWithin ||
+            MembersList.IsKeyboardFocusWithin ||
+            IsMouseOver ||
+            MembersList.IsMouseOver ||
+            UserIsInteractingWithList();
     }
 
     private void ExpandGroup(string groupHeading)
@@ -404,10 +410,19 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
 
     private void SuppressAutoScrollForCurrentSelection()
     {
+        _manualListInteractionUntilUtc = DateTime.UtcNow.AddSeconds(3);
+
         if (MembersList.SelectedItem is MemberItem item)
         {
             _manualScrollSuppressedMember = item;
         }
+    }
+
+    private bool UserIsInteractingWithList()
+    {
+        return DateTime.UtcNow < _manualListInteractionUntilUtc ||
+            IsMouseOver ||
+            MembersList.IsMouseOver;
     }
 
     private bool IsItemVisible(MemberItem item)
@@ -435,6 +450,11 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
         if (itemPanel == null)
         {
             e.Handled = true;
+            return;
+        }
+
+        if (itemContainer?.DataContext is MemberItem { Kind: MemberKind.Region })
+        {
             return;
         }
 

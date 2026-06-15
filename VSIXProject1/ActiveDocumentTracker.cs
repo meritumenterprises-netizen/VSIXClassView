@@ -128,6 +128,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             var currentOpenTextEditorDocument = GetCurrentOpenCSharpTextEditorDocument();
             if (currentOpenTextEditorDocument != null)
             {
+                EnableCaretSelectionForActiveTextEditor();
                 RefreshFromDocument(currentOpenTextEditorDocument, selectFromCaret: _allowCaretSelection);
             }
         }
@@ -156,7 +157,8 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             var currentOpenTextEditorDocument = GetCurrentOpenCSharpTextEditorDocument();
             if (currentOpenTextEditorDocument != null)
             {
-                RefreshFromDocument(currentOpenTextEditorDocument, force: true, selectFromCaret: false);
+                EnableCaretSelectionForActiveTextEditor();
+                RefreshFromDocument(currentOpenTextEditorDocument, force: true, selectFromCaret: _allowCaretSelection);
                 return;
             }
 
@@ -276,7 +278,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             var currentOpenTextEditorDocument = GetCurrentOpenCSharpTextEditorDocument();
             if (currentOpenTextEditorDocument != null)
             {
-                RefreshFromDocument(currentOpenTextEditorDocument, force: true, selectFromCaret: selectFromCaret);
+                RefreshFromDocument(currentOpenTextEditorDocument, selectFromCaret: selectFromCaret);
                 return;
             }
 
@@ -449,6 +451,16 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     private bool CaretSelectionIsSuppressed()
     {
         return DateTime.UtcNow < _suppressCaretSelectionUntilUtc;
+    }
+
+    private void EnableCaretSelectionForActiveTextEditor()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (!CaretSelectionIsSuppressed() && ActiveWindowIsCSharpTextEditor())
+        {
+            _allowCaretSelection = true;
+        }
     }
 
     private bool MembersToolWindowHasFocus()
@@ -873,7 +885,14 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             return;
         }
 
-        SelectMemberName(textDoc, item);
+        if (item.Kind == MemberKind.Region)
+        {
+            MoveCaretToMember(textDoc, item);
+        }
+        else
+        {
+            SelectMemberName(textDoc, item);
+        }
     }
 
     private Document? GetTextViewDocument(MemberItem item)
@@ -929,6 +948,24 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
 
             textDoc.Selection.MoveToPoint(start);
             textDoc.Selection.MoveToPoint(end, true);
+        }
+    }
+
+    private static void MoveCaretToMember(TextDocument textDoc, MemberItem item)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        try
+        {
+            textDoc.Selection.MoveToLineAndOffset(
+                item.NameStartLine + 1,
+                item.NameStartColumn + 1);
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            var point = textDoc.StartPoint.CreateEditPoint();
+            point.MoveToLineAndOffset(item.NameStartLine + 1, item.NameStartColumn + 1);
+            textDoc.Selection.MoveToPoint(point);
         }
     }
 
