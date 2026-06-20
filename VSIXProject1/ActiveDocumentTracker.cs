@@ -125,6 +125,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                 return;
             }
 
+            if (ResetIfActiveDocumentIsUnsupported())
+            {
+                return;
+            }
+
             var currentOpenTextEditorDocument = GetCurrentOpenCSharpTextEditorDocument();
             if (currentOpenTextEditorDocument != null)
             {
@@ -150,6 +155,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             }
 
             if (TryRefreshFromActiveDesigner())
+            {
+                return;
+            }
+
+            if (ResetIfActiveDocumentIsUnsupported())
             {
                 return;
             }
@@ -209,6 +219,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         }
 
         var focusedDocument = GetCurrentDocumentFrameDocument() ?? gotFocus.Document;
+        if (ResetIfActiveDocumentIsUnsupported())
+        {
+            return;
+        }
+
         if (gotFocus.Type == vsWindowType.vsWindowTypeDocument &&
             DocumentIsCSharpTextEditor(focusedDocument))
         {
@@ -245,6 +260,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             return;
         }
 
+        if (ResetIfActiveDocumentIsUnsupported())
+        {
+            return;
+        }
+
         Refresh(selectFromCaret: false);
     }
 
@@ -271,6 +291,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             }
 
             if (TryRefreshFromActiveDesigner())
+            {
+                return;
+            }
+
+            if (ResetIfActiveDocumentIsUnsupported())
             {
                 return;
             }
@@ -1021,9 +1046,46 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
             DocumentIsCSharpTextEditor(activeWindow.Document);
     }
 
+    private bool ResetIfActiveDocumentIsUnsupported()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (!ActiveWindowIsUnsupportedDocument())
+        {
+            return false;
+        }
+
+        _currentOpenTextEditorDocument = null;
+        _allowCaretSelection = false;
+        ClearLoadedSource();
+        _control.SetMembers(Array.Empty<MemberItem>());
+        return true;
+    }
+
+    private bool ActiveWindowIsUnsupportedDocument()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var activeWindow = _dte?.ActiveWindow;
+        if (activeWindow?.Type != vsWindowType.vsWindowTypeDocument ||
+            ActiveWindowIsDesigner())
+        {
+            return false;
+        }
+
+        var document = GetCurrentDocumentFrameDocument() ?? activeWindow.Document ?? _dte?.ActiveDocument;
+        return document != null && !DocumentIsCSharpTextEditor(document);
+    }
+
     private Document? GetCurrentOpenCSharpTextEditorDocument()
     {
         ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (ActiveWindowIsUnsupportedDocument())
+        {
+            _currentOpenTextEditorDocument = null;
+            return null;
+        }
 
         var currentFrameDocument = GetCurrentDocumentFrameDocument();
         if (DocumentIsCSharpTextEditor(currentFrameDocument))
@@ -1176,6 +1238,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                     return;
                 }
 
+                if (ResetIfActiveDocumentIsUnsupported())
+                {
+                    return;
+                }
+
                 var currentOpenTextEditorDocument = GetCurrentOpenCSharpTextEditorDocument();
                 if (currentOpenTextEditorDocument != null)
                 {
@@ -1220,6 +1287,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                     return;
                 }
 
+                if (ResetIfActiveDocumentIsUnsupported())
+                {
+                    return;
+                }
+
                 var currentOpenTextEditorDocument = GetCurrentOpenCSharpTextEditorDocument();
                 if (currentOpenTextEditorDocument != null)
                 {
@@ -1253,6 +1325,11 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
                 }
 
                 if (TryRefreshFromActiveDesigner())
+                {
+                    return;
+                }
+
+                if (ResetIfActiveDocumentIsUnsupported())
                 {
                     return;
                 }

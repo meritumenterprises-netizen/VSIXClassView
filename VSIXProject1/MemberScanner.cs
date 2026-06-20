@@ -243,7 +243,7 @@ namespace VSIXProject1
                     var parameterDisplayParts = GetParameterDisplayParts(m.ParameterList);
                     var asyncPrefix = MethodHasAsyncModifier(m) ? "async " : string.Empty;
                     var methodDisplayParts = MethodHasAsyncModifier(m)
-                        ? Parts(("async ", true, false), (returnType, true, false), (" : ", false, false), (methodDisplayName, true, true), (" (", false, false))
+                        ? Parts(("async ", false, false), (returnType, true, false), (" : ", false, false), (methodDisplayName, true, true), (" (", false, false))
                         : Parts((returnType, true, false), (" : ", false, false), (methodDisplayName, true, true), (" (", false, false));
                     return new MemberItem
                     {
