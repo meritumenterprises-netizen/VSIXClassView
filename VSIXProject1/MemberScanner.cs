@@ -241,12 +241,16 @@ namespace VSIXProject1
                     var returnType = GetShortTypeName(m.ReturnType);
                     var methodDisplayName = GetMethodDisplayName(m);
                     var parameterDisplayParts = GetParameterDisplayParts(m.ParameterList);
+                    var asyncPrefix = MethodHasAsyncModifier(m) ? "async " : string.Empty;
+                    var methodDisplayParts = MethodHasAsyncModifier(m)
+                        ? Parts(("async ", true, false), (returnType, true, false), (" : ", false, false), (methodDisplayName, true, true), (" (", false, false))
+                        : Parts((returnType, true, false), (" : ", false, false), (methodDisplayName, true, true), (" (", false, false));
                     return new MemberItem
                     {
                         Name = m.Identifier.ValueText,
                         DeclaringClassName = classDisplayName,
-                        DisplayText = $"{returnType} : {methodDisplayName} ({GetParameterDisplayText(m.ParameterList)})",
-                        DisplayParts = Parts((returnType, true, false), (" : ", false, false), (methodDisplayName, true, true), (" (", false, false))
+                        DisplayText = $"{asyncPrefix}{returnType} : {methodDisplayName} ({GetParameterDisplayText(m.ParameterList)})",
+                        DisplayParts = methodDisplayParts
                             .Concat(parameterDisplayParts)
                             .Concat(Parts((")", false, false)))
                             .ToList(),
@@ -587,6 +591,11 @@ namespace VSIXProject1
         private static bool FieldIsConst(FieldDeclarationSyntax field)
         {
             return field.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.ConstKeyword));
+        }
+
+        private static bool MethodHasAsyncModifier(MethodDeclarationSyntax method)
+        {
+            return method.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.AsyncKeyword));
         }
 
         private static string GetPropertyAccessorDisplayText(PropertyDeclarationSyntax property)
