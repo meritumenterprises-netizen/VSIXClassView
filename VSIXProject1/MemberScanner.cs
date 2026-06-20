@@ -680,26 +680,30 @@ namespace VSIXProject1
         {
             if (type == null)
             {
-                return TypeNameParts("object");
+                return TypeNameParts("object", isSystemType: true);
             }
 
             switch (type)
             {
                 case PredefinedTypeSyntax predefinedType:
-                    return TypeNameParts(predefinedType.Keyword.ValueText);
+                    return TypeNameParts(predefinedType.Keyword.ValueText, isSystemType: true);
 
                 case IdentifierNameSyntax identifierName:
-                    return TypeNameParts(identifierName.Identifier.ValueText);
+                    return TypeNameParts(
+                        identifierName.Identifier.ValueText,
+                        IsKnownSystemTypeName(identifierName.Identifier.ValueText));
 
                 case GenericNameSyntax genericName:
                     return Combine(
-                        TypeNameParts(genericName.Identifier.ValueText),
+                        TypeNameParts(
+                            genericName.Identifier.ValueText,
+                            IsKnownSystemTypeName(genericName.Identifier.ValueText)),
                         Parts(("<", false, false)),
                         GetTypeArgumentDisplayParts(genericName.TypeArgumentList.Arguments),
                         Parts((">", false, false)));
 
                 case QualifiedNameSyntax qualifiedName:
-                    return GetTypeDisplayParts(qualifiedName.Right);
+                    return GetQualifiedTypeDisplayParts(qualifiedName);
 
                 case AliasQualifiedNameSyntax aliasQualifiedName:
                     return GetTypeDisplayParts(aliasQualifiedName.Name);
@@ -716,8 +720,23 @@ namespace VSIXProject1
                     return GetTupleTypeDisplayParts(tupleType);
 
                 default:
-                    return TypeNameParts(type.ToString());
+                    return TypeNameParts(type.ToString(), isSystemType: TypeStartsWithSystemNamespace(type.ToString()));
             }
+        }
+
+        private static IReadOnlyList<MemberDisplayPart> GetQualifiedTypeDisplayParts(QualifiedNameSyntax qualifiedName)
+        {
+            var isSystemType = TypeStartsWithSystemNamespace(qualifiedName.ToString());
+            return qualifiedName.Right switch
+            {
+                GenericNameSyntax genericName => Combine(
+                    TypeNameParts(genericName.Identifier.ValueText, isSystemType),
+                    Parts(("<", false, false)),
+                    GetTypeArgumentDisplayParts(genericName.TypeArgumentList.Arguments),
+                    Parts((">", false, false))),
+                IdentifierNameSyntax identifierName => TypeNameParts(identifierName.Identifier.ValueText, isSystemType),
+                _ => GetTypeDisplayParts(qualifiedName.Right)
+            };
         }
 
         private static IReadOnlyList<MemberDisplayPart> GetTypeArgumentDisplayParts(SeparatedSyntaxList<TypeSyntax> typeArguments)
@@ -759,15 +778,72 @@ namespace VSIXProject1
             return parts;
         }
 
-        private static IReadOnlyList<MemberDisplayPart> TypeNameParts(string text)
+        private static IReadOnlyList<MemberDisplayPart> TypeNameParts(string text, bool isSystemType = false)
         {
             return new[]
             {
                 new MemberDisplayPart(
                     text,
                     isBold: true,
-                    isTypeName: !string.Equals(text, "void", StringComparison.Ordinal))
+                    isTypeName: !isSystemType && !string.Equals(text, "void", StringComparison.Ordinal))
             };
+        }
+
+        private static bool TypeStartsWithSystemNamespace(string typeName)
+        {
+            return typeName.StartsWith("System.", StringComparison.Ordinal) ||
+                typeName.StartsWith("global::System.", StringComparison.Ordinal);
+        }
+
+        private static bool IsKnownSystemTypeName(string typeName)
+        {
+            return typeName is
+                "Action" or
+                "AggregateException" or
+                "Array" or
+                "Attribute" or
+                "bool" or
+                "byte" or
+                "char" or
+                "DateTime" or
+                "DateTimeOffset" or
+                "decimal" or
+                "Dictionary" or
+                "double" or
+                "Exception" or
+                "float" or
+                "Func" or
+                "Guid" or
+                "HashSet" or
+                "ICollection" or
+                "IComparable" or
+                "IDictionary" or
+                "IDisposable" or
+                "IEnumerable" or
+                "IEquatable" or
+                "IList" or
+                "IReadOnlyCollection" or
+                "IReadOnlyDictionary" or
+                "IReadOnlyList" or
+                "int" or
+                "InvalidOperationException" or
+                "IObservable" or
+                "IObserver" or
+                "IQueryable" or
+                "long" or
+                "List" or
+                "object" or
+                "ObservableCollection" or
+                "sbyte" or
+                "short" or
+                "string" or
+                "Task" or
+                "TimeSpan" or
+                "uint" or
+                "ulong" or
+                "ushort" or
+                "ValueTask" or
+                "void";
         }
 
         private static string GetMethodDisplayName(MethodDeclarationSyntax method)
