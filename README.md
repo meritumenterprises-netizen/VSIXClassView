@@ -35,3 +35,7 @@ Initial release of the extension
 ## 1.0.1
 Support for regions and for async methods
 [1.0.1](https://raw.githubusercontent.com/meritumenterprises-netizen/VSIXClassView/master/Releases/1.0.1/VSIXClassView.vsix)  
+
+## 1.0.2
+Support for types as hyperlinks and loading types in text editor (with type caching)
+[1.0.2](https://raw.githubusercontent.com/meritumenterprises-netizen/VSIXClassView/master/Releases/1.0.2/VSIXClassView.vsix)  
