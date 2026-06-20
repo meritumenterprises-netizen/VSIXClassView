@@ -159,6 +159,7 @@ namespace VSIXProject1
             }
 
             var classDisplayName = GetTypeDisplayName(currentType);
+            var typeParameterNames = GetTypeParameterNames(currentTypeDeclaration.TypeParameterList);
 
             var fields = currentTypeDeclaration.Members
                 .OfType<FieldDeclarationSyntax>()
@@ -180,11 +181,11 @@ namespace VSIXProject1
                         DisplayParts = FieldIsConst(f)
                             ? Combine(
                                 Parts((v.Identifier.ValueText, true, true), (" : ", false, false)),
-                                GetTypeDisplayParts(f.Declaration.Type),
+                                GetTypeDisplayParts(f.Declaration.Type, typeParameterNames),
                                 Parts(($" = {v.Initializer?.Value}", false, false)))
                             : Combine(
                                 Parts((v.Identifier.ValueText, true, true), (" : ", false, false)),
-                                GetTypeDisplayParts(f.Declaration.Type),
+                                GetTypeDisplayParts(f.Declaration.Type, typeParameterNames),
                                 Parts((initializerText, false, false))),
                         Kind = FieldIsConst(f) ? MemberKind.Const : MemberKind.Field,
                         StartOffset = f.SpanStart,
@@ -218,11 +219,11 @@ namespace VSIXProject1
                         DisplayParts = string.IsNullOrEmpty(accessorText)
                             ? Combine(
                                 Parts((p.Identifier.ValueText, true, true), (" : ", false, false)),
-                                GetTypeDisplayParts(p.Type),
+                                GetTypeDisplayParts(p.Type, typeParameterNames),
                                 Parts((initializerText, false, false)))
                             : Combine(
                                 Parts((p.Identifier.ValueText, true, true), (" : ", false, false)),
-                                GetTypeDisplayParts(p.Type),
+                                GetTypeDisplayParts(p.Type, typeParameterNames),
                                 Parts(($" {accessorText}", false, false), (initializerText, false, false))),
                         Kind = MemberKind.Property,
                         StartOffset = p.SpanStart,
@@ -245,15 +246,18 @@ namespace VSIXProject1
                     var span = parsedText.Lines.GetLinePositionSpan(m.Identifier.Span);
                     var returnType = GetShortTypeName(m.ReturnType);
                     var methodDisplayName = GetMethodDisplayName(m);
-                    var parameterDisplayParts = GetParameterDisplayParts(m.ParameterList);
+                    var methodTypeParameterNames = CombineTypeParameterNames(
+                        typeParameterNames,
+                        GetTypeParameterNames(m.TypeParameterList));
+                    var parameterDisplayParts = GetParameterDisplayParts(m.ParameterList, methodTypeParameterNames);
                     var asyncPrefix = MethodHasAsyncModifier(m) ? "async " : string.Empty;
                     var methodDisplayParts = MethodHasAsyncModifier(m)
                         ? Combine(
                             Parts(("async ", false, false)),
-                            GetTypeDisplayParts(m.ReturnType),
+                            GetTypeDisplayParts(m.ReturnType, methodTypeParameterNames),
                             Parts((" : ", false, false), (methodDisplayName, true, true), (" (", false, false)))
                         : Combine(
-                            GetTypeDisplayParts(m.ReturnType),
+                            GetTypeDisplayParts(m.ReturnType, methodTypeParameterNames),
                             Parts((" : ", false, false), (methodDisplayName, true, true), (" (", false, false)));
                     return new MemberItem
                     {
@@ -282,7 +286,7 @@ namespace VSIXProject1
                 .Select(c =>
                 {
                     var span = parsedText.Lines.GetLinePositionSpan(c.Identifier.Span);
-                    var parameterDisplayParts = GetParameterDisplayParts(c.ParameterList);
+                    var parameterDisplayParts = GetParameterDisplayParts(c.ParameterList, typeParameterNames);
                     return new MemberItem
                     {
                         Name = c.Identifier.ValueText,
@@ -353,15 +357,16 @@ namespace VSIXProject1
             var span = parsedText.Lines.GetLinePositionSpan(localFunction.Identifier.Span);
             var returnType = GetShortTypeName(localFunction.ReturnType);
             var methodDisplayName = GetLocalFunctionDisplayName(localFunction);
-            var parameterDisplayParts = GetParameterDisplayParts(localFunction.ParameterList);
+            var typeParameterNames = GetTypeParameterNames(localFunction.TypeParameterList);
+            var parameterDisplayParts = GetParameterDisplayParts(localFunction.ParameterList, typeParameterNames);
             var asyncPrefix = LocalFunctionHasAsyncModifier(localFunction) ? "async " : string.Empty;
             var methodDisplayParts = LocalFunctionHasAsyncModifier(localFunction)
                 ? Combine(
                     Parts(("async ", false, false)),
-                    GetTypeDisplayParts(localFunction.ReturnType),
+                    GetTypeDisplayParts(localFunction.ReturnType, typeParameterNames),
                     Parts((" : ", false, false), (methodDisplayName, true, true), (" (", false, false)))
                 : Combine(
-                    GetTypeDisplayParts(localFunction.ReturnType),
+                    GetTypeDisplayParts(localFunction.ReturnType, typeParameterNames),
                     Parts((" : ", false, false), (methodDisplayName, true, true), (" (", false, false)));
 
             return new MemberItem
@@ -538,13 +543,14 @@ namespace VSIXProject1
         {
             var span = parsedText.Lines.GetLinePositionSpan(currentClass.Identifier.Span);
             var classDisplayName = GetTypeDisplayName(currentClass);
+            var typeParameterNames = GetTypeParameterNames(currentClass.TypeParameterList);
             return new MemberItem
             {
                 Name = currentClass.Identifier.ValueText,
                 DeclaringClassName = classDisplayName,
                 DisplayText = $"ctor {currentClass.Identifier.ValueText} ({GetParameterDisplayText(currentClass.ParameterList!)})",
                 DisplayParts = Parts(("ctor ", false, false), (currentClass.Identifier.ValueText, true, true), (" (", false, false))
-                    .Concat(GetParameterDisplayParts(currentClass.ParameterList!))
+                    .Concat(GetParameterDisplayParts(currentClass.ParameterList!, typeParameterNames))
                     .Concat(Parts((")", false, false)))
                     .ToList(),
                 Kind = MemberKind.Method,
@@ -569,6 +575,29 @@ namespace VSIXProject1
         private static bool HasTopLevelStatements(CompilationUnitSyntax root)
         {
             return root.Members.OfType<GlobalStatementSyntax>().Any();
+        }
+
+        private static ISet<string> GetTypeParameterNames(TypeParameterListSyntax? typeParameterList)
+        {
+            return typeParameterList == null
+                ? new HashSet<string>(StringComparer.Ordinal)
+                : new HashSet<string>(
+                    typeParameterList.Parameters.Select(parameter => parameter.Identifier.ValueText),
+                    StringComparer.Ordinal);
+        }
+
+        private static ISet<string> CombineTypeParameterNames(
+            ISet<string> first,
+            ISet<string> second)
+        {
+            return new HashSet<string>(first.Concat(second), StringComparer.Ordinal);
+        }
+
+        private static bool TypeIsDeclaredTypeParameter(
+            string typeName,
+            ISet<string>? typeParameterNames)
+        {
+            return typeParameterNames?.Contains(typeName) == true;
         }
 
         private static bool IsSupportedType(BaseTypeDeclarationSyntax typeDeclaration)
@@ -632,7 +661,9 @@ namespace VSIXProject1
                         : $"{parameter.Identifier.ValueText}: {GetShortTypeName(parameter.Type)} = {parameter.Default.Value}"));
         }
 
-        private static IReadOnlyList<MemberDisplayPart> GetParameterDisplayParts(ParameterListSyntax parameterList)
+        private static IReadOnlyList<MemberDisplayPart> GetParameterDisplayParts(
+            ParameterListSyntax parameterList,
+            ISet<string>? typeParameterNames = null)
         {
             var parts = new List<MemberDisplayPart>();
 
@@ -648,7 +679,7 @@ namespace VSIXProject1
                     parameter.Identifier.ValueText,
                     isParameterName: true));
                 parts.Add(new MemberDisplayPart(": "));
-                parts.AddRange(GetTypeDisplayParts(parameter.Type));
+                parts.AddRange(GetTypeDisplayParts(parameter.Type, typeParameterNames));
                 if (parameter.Default != null)
                 {
                     parts.Add(new MemberDisplayPart($" = {parameter.Default.Value}"));
@@ -676,7 +707,9 @@ namespace VSIXProject1
             return partGroups.SelectMany(partGroup => partGroup).ToList();
         }
 
-        private static IReadOnlyList<MemberDisplayPart> GetTypeDisplayParts(TypeSyntax? type)
+        private static IReadOnlyList<MemberDisplayPart> GetTypeDisplayParts(
+            TypeSyntax? type,
+            ISet<string>? typeParameterNames = null)
         {
             if (type == null)
             {
@@ -691,55 +724,67 @@ namespace VSIXProject1
                 case IdentifierNameSyntax identifierName:
                     return TypeNameParts(
                         identifierName.Identifier.ValueText,
-                        IsKnownSystemTypeName(identifierName.Identifier.ValueText));
+                        IsKnownSystemTypeName(identifierName.Identifier.ValueText),
+                        TypeIsDeclaredTypeParameter(identifierName.Identifier.ValueText, typeParameterNames));
 
                 case GenericNameSyntax genericName:
                     return Combine(
                         TypeNameParts(
                             genericName.Identifier.ValueText,
-                            IsKnownSystemTypeName(genericName.Identifier.ValueText)),
+                            IsKnownSystemTypeName(genericName.Identifier.ValueText),
+                            TypeIsDeclaredTypeParameter(genericName.Identifier.ValueText, typeParameterNames)),
                         Parts(("<", false, false)),
-                        GetTypeArgumentDisplayParts(genericName.TypeArgumentList.Arguments),
+                        GetTypeArgumentDisplayParts(genericName.TypeArgumentList.Arguments, typeParameterNames),
                         Parts((">", false, false)));
 
                 case QualifiedNameSyntax qualifiedName:
-                    return GetQualifiedTypeDisplayParts(qualifiedName);
+                    return GetQualifiedTypeDisplayParts(qualifiedName, typeParameterNames);
 
                 case AliasQualifiedNameSyntax aliasQualifiedName:
-                    return GetTypeDisplayParts(aliasQualifiedName.Name);
+                    return GetTypeDisplayParts(aliasQualifiedName.Name, typeParameterNames);
 
                 case NullableTypeSyntax nullableType:
-                    return Combine(GetTypeDisplayParts(nullableType.ElementType), Parts(("?", false, false)));
+                    return Combine(GetTypeDisplayParts(nullableType.ElementType, typeParameterNames), Parts(("?", false, false)));
 
                 case ArrayTypeSyntax arrayType:
                     return Combine(
-                        GetTypeDisplayParts(arrayType.ElementType),
+                        GetTypeDisplayParts(arrayType.ElementType, typeParameterNames),
                         Parts((string.Concat(arrayType.RankSpecifiers.Select(rank => "[" + new string(',', rank.Rank - 1) + "]")), false, false)));
 
                 case TupleTypeSyntax tupleType:
-                    return GetTupleTypeDisplayParts(tupleType);
+                    return GetTupleTypeDisplayParts(tupleType, typeParameterNames);
 
                 default:
                     return TypeNameParts(type.ToString(), isSystemType: TypeStartsWithSystemNamespace(type.ToString()));
             }
         }
 
-        private static IReadOnlyList<MemberDisplayPart> GetQualifiedTypeDisplayParts(QualifiedNameSyntax qualifiedName)
+        private static IReadOnlyList<MemberDisplayPart> GetQualifiedTypeDisplayParts(
+            QualifiedNameSyntax qualifiedName,
+            ISet<string>? typeParameterNames)
         {
             var isSystemType = TypeStartsWithSystemNamespace(qualifiedName.ToString());
             return qualifiedName.Right switch
             {
                 GenericNameSyntax genericName => Combine(
-                    TypeNameParts(genericName.Identifier.ValueText, isSystemType),
+                    TypeNameParts(
+                        genericName.Identifier.ValueText,
+                        isSystemType,
+                        TypeIsDeclaredTypeParameter(genericName.Identifier.ValueText, typeParameterNames)),
                     Parts(("<", false, false)),
-                    GetTypeArgumentDisplayParts(genericName.TypeArgumentList.Arguments),
+                    GetTypeArgumentDisplayParts(genericName.TypeArgumentList.Arguments, typeParameterNames),
                     Parts((">", false, false))),
-                IdentifierNameSyntax identifierName => TypeNameParts(identifierName.Identifier.ValueText, isSystemType),
-                _ => GetTypeDisplayParts(qualifiedName.Right)
+                IdentifierNameSyntax identifierName => TypeNameParts(
+                    identifierName.Identifier.ValueText,
+                    isSystemType,
+                    TypeIsDeclaredTypeParameter(identifierName.Identifier.ValueText, typeParameterNames)),
+                _ => GetTypeDisplayParts(qualifiedName.Right, typeParameterNames)
             };
         }
 
-        private static IReadOnlyList<MemberDisplayPart> GetTypeArgumentDisplayParts(SeparatedSyntaxList<TypeSyntax> typeArguments)
+        private static IReadOnlyList<MemberDisplayPart> GetTypeArgumentDisplayParts(
+            SeparatedSyntaxList<TypeSyntax> typeArguments,
+            ISet<string>? typeParameterNames)
         {
             var parts = new List<MemberDisplayPart>();
             for (var index = 0; index < typeArguments.Count; index++)
@@ -749,13 +794,15 @@ namespace VSIXProject1
                     parts.Add(new MemberDisplayPart(", "));
                 }
 
-                parts.AddRange(GetTypeDisplayParts(typeArguments[index]));
+                parts.AddRange(GetTypeDisplayParts(typeArguments[index], typeParameterNames));
             }
 
             return parts;
         }
 
-        private static IReadOnlyList<MemberDisplayPart> GetTupleTypeDisplayParts(TupleTypeSyntax tupleType)
+        private static IReadOnlyList<MemberDisplayPart> GetTupleTypeDisplayParts(
+            TupleTypeSyntax tupleType,
+            ISet<string>? typeParameterNames)
         {
             var parts = new List<MemberDisplayPart> { new("(") };
             for (var index = 0; index < tupleType.Elements.Count; index++)
@@ -771,21 +818,26 @@ namespace VSIXProject1
                     parts.Add(new MemberDisplayPart($"{element.Identifier.ValueText}: "));
                 }
 
-                parts.AddRange(GetTypeDisplayParts(element.Type));
+                parts.AddRange(GetTypeDisplayParts(element.Type, typeParameterNames));
             }
 
             parts.Add(new MemberDisplayPart(")"));
             return parts;
         }
 
-        private static IReadOnlyList<MemberDisplayPart> TypeNameParts(string text, bool isSystemType = false)
+        private static IReadOnlyList<MemberDisplayPart> TypeNameParts(
+            string text,
+            bool isSystemType = false,
+            bool isDeclaredTypeParameter = false)
         {
             return new[]
             {
                 new MemberDisplayPart(
                     text,
                     isBold: true,
-                    isTypeName: !isSystemType && !string.Equals(text, "void", StringComparison.Ordinal))
+                    isTypeName: !isSystemType &&
+                        !isDeclaredTypeParameter &&
+                        !string.Equals(text, "void", StringComparison.Ordinal))
             };
         }
 
