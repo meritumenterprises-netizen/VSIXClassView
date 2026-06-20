@@ -27,8 +27,11 @@ The extension has rudimentary support for VS.NET 2026 themes.
 
 # Releases
 
-<h2>1.0.0</h2>
-
-
+## 1.0.0
 Initial release of the extension
-[1.0.0](https://raw.githubusercontent.com/meritumenterprises-netizen/VSIXClassView/master/Releases/1.0.0/VSIXClassView.vsix)
+[1.0.0](https://raw.githubusercontent.com/meritumenterprises-netizen/VSIXClassView/master/Releases/1.0.0/VSIXClassView.vsix)  
+
+
+## 1.0.1
+Support for regions and for async methods
+[1.0.1](https://raw.githubusercontent.com/meritumenterprises-netizen/VSIXClassView/master/Releases/1.0.1/VSIXClassView.vsix)  
