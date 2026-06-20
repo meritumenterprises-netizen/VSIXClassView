@@ -1,5 +1,7 @@
 using EnvDTE;
 using EnvDTE80;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.ComponentModelHost;
 using Microsoft.VisualStudio.Shell;
@@ -11,6 +13,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Reflection;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 using VSIXProject1;
@@ -35,6 +38,9 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
     private DateTime _suppressCaretSelectionUntilUtc = DateTime.MinValue;
     private bool _solutionExplorerSelectionOwnsMembersToolWindow;
     private bool _allowCaretSelection;
+    private readonly Dictionary<string, string?> _decompiledTypeFilePathCache = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Type?> _externalTypeCache = new(StringComparer.Ordinal);
+    private readonly object _typeResolutionCacheLock = new();
 
     public ActiveDocumentTracker(
         AsyncPackage package,
@@ -43,6 +49,7 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         _package = package;
         _control = control;
         _control.MemberDoubleClicked += NavigateToMember;
+        _control.TypeClicked += NavigateToType;
     }
 
     public async Task InitializeAsync()
@@ -918,6 +925,705 @@ public sealed class ActiveDocumentTracker : IVsRunningDocTableEvents
         {
             SelectMemberName(textDoc, item);
         }
+    }
+
+    private void NavigateToType(string typeName)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var shortTypeName = GetClickableShortTypeName(typeName);
+        if (string.IsNullOrEmpty(shortTypeName))
+        {
+            return;
+        }
+
+        var definition = FindTypeDefinition(shortTypeName);
+        if (definition == null)
+        {
+            OpenDecompiledFrameworkType(shortTypeName);
+            return;
+        }
+
+        try
+        {
+            var textWindow = _dte?.ItemOperations.OpenFile(
+                definition.Value.FilePath,
+                EnvDTE.Constants.vsViewKindTextView);
+            textWindow?.Activate();
+
+            var textDoc = textWindow?.Document?.Object("TextDocument") as TextDocument;
+            textDoc?.Selection.MoveToLineAndOffset(
+                definition.Value.Line + 1,
+                definition.Value.Column + 1);
+        }
+        catch
+        {
+        }
+    }
+
+    private (string FilePath, int Line, int Column)? FindTypeDefinition(string typeName)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        foreach (var filePath in GetSolutionCSharpFiles().Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var sourceText = File.ReadAllText(filePath);
+                var tree = CSharpSyntaxTree.ParseText(sourceText);
+                var parsedText = tree.GetText();
+                var typeDeclaration = tree.GetCompilationUnitRoot()
+                    .DescendantNodes()
+                    .OfType<BaseTypeDeclarationSyntax>()
+                    .FirstOrDefault(type => string.Equals(type.Identifier.ValueText, typeName, StringComparison.Ordinal));
+
+                if (typeDeclaration == null)
+                {
+                    continue;
+                }
+
+                var span = parsedText.Lines.GetLinePositionSpan(typeDeclaration.Identifier.Span);
+                return (filePath, span.Start.Line, span.Start.Character);
+            }
+            catch
+            {
+            }
+        }
+
+        return null;
+    }
+
+    private void OpenDecompiledFrameworkType(string typeName)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        _package.JoinableTaskFactory
+            .RunAsync(async () =>
+            {
+                await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
+                _control.SetTypeResolutionInProgress(true);
+
+                try
+                {
+                    var referenceAssemblyPaths = GetSolutionReferenceAssemblyPaths()
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    var filePath = await System.Threading.Tasks.Task.Run(
+                        () => GetOrCreateDecompiledTypeFilePath(typeName, referenceAssemblyPaths));
+
+                    await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    if (filePath == null)
+                    {
+                        return;
+                    }
+
+                    var textWindow = _dte?.ItemOperations.OpenFile(
+                        filePath,
+                        EnvDTE.Constants.vsViewKindTextView);
+                    textWindow?.Activate();
+                }
+                catch
+                {
+                }
+                finally
+                {
+                    await _package.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    _control.SetTypeResolutionInProgress(false);
+                }
+            })
+            .FileAndForget("VSIXProject1/OpenDecompiledFrameworkType");
+    }
+
+    private string? GetOrCreateDecompiledTypeFilePath(
+        string typeName,
+        IReadOnlyList<string> referenceAssemblyPaths)
+    {
+        var mappedTypeName = GetMappedExternalTypeName(typeName);
+        lock (_typeResolutionCacheLock)
+        {
+            if (_decompiledTypeFilePathCache.TryGetValue(mappedTypeName, out var cachedFilePath))
+            {
+                return cachedFilePath;
+            }
+        }
+
+        var frameworkType = ResolveExternalType(typeName, referenceAssemblyPaths);
+        var cacheKey = frameworkType?.FullName ?? mappedTypeName;
+        lock (_typeResolutionCacheLock)
+        {
+            if (!string.Equals(cacheKey, mappedTypeName, StringComparison.Ordinal) &&
+                _decompiledTypeFilePathCache.TryGetValue(cacheKey, out var cachedFilePath))
+            {
+                _decompiledTypeFilePathCache[mappedTypeName] = cachedFilePath;
+                return cachedFilePath;
+            }
+        }
+
+        var filePath = frameworkType == null
+            ? WriteKnownExternalTypeStub(typeName)
+            : WriteFrameworkTypeStub(frameworkType);
+
+        lock (_typeResolutionCacheLock)
+        {
+            _decompiledTypeFilePathCache[cacheKey] = filePath;
+            _decompiledTypeFilePathCache[mappedTypeName] = filePath;
+        }
+
+        return filePath;
+    }
+
+    private Type? ResolveExternalType(
+        string typeName,
+        IReadOnlyList<string> referenceAssemblyPaths)
+    {
+        var mappedTypeName = GetMappedExternalTypeName(typeName);
+        lock (_typeResolutionCacheLock)
+        {
+            if (_externalTypeCache.TryGetValue(mappedTypeName, out var cachedType))
+            {
+                return cachedType;
+            }
+        }
+
+        var resolvedType = ResolveTypeFromLoadedAssemblies(mappedTypeName, typeName) ??
+            ResolveTypeFromReferencedAssemblies(mappedTypeName, typeName, referenceAssemblyPaths);
+        lock (_typeResolutionCacheLock)
+        {
+            _externalTypeCache[resolvedType?.FullName ?? mappedTypeName] = resolvedType;
+            _externalTypeCache[mappedTypeName] = resolvedType;
+        }
+
+        return resolvedType;
+    }
+
+    private static string GetMappedExternalTypeName(string typeName)
+    {
+        return typeName switch
+        {
+            "bool" => "System.Boolean",
+            "byte" => "System.Byte",
+            "char" => "System.Char",
+            "decimal" => "System.Decimal",
+            "double" => "System.Double",
+            "float" => "System.Single",
+            "int" => "System.Int32",
+            "long" => "System.Int64",
+            "object" => "System.Object",
+            "sbyte" => "System.SByte",
+            "short" => "System.Int16",
+            "string" => "System.String",
+            "uint" => "System.UInt32",
+            "ulong" => "System.UInt64",
+            "ushort" => "System.UInt16",
+            "Task" => "System.Threading.Tasks.Task",
+            "IActionResult" => "Microsoft.AspNetCore.Mvc.IActionResult",
+            "List" => "System.Collections.Generic.List`1",
+            "Dictionary" => "System.Collections.Generic.Dictionary`2",
+            "IEnumerable" => "System.Collections.Generic.IEnumerable`1",
+            "IList" => "System.Collections.Generic.IList`1",
+            "ICollection" => "System.Collections.Generic.ICollection`1",
+            _ => typeName
+        };
+    }
+
+    private static Type? ResolveTypeFromLoadedAssemblies(string mappedTypeName, string shortTypeName)
+    {
+        return Type.GetType(mappedTypeName) ??
+            AppDomain.CurrentDomain
+                .GetAssemblies()
+                .Select(assembly => FindTypeInAssembly(assembly, mappedTypeName, shortTypeName))
+                .FirstOrDefault(type => type != null);
+    }
+
+    private static Type? ResolveTypeFromReferencedAssemblies(
+        string mappedTypeName,
+        string shortTypeName,
+        IEnumerable<string> referenceAssemblyPaths)
+    {
+        foreach (var assemblyPath in referenceAssemblyPaths)
+        {
+            try
+            {
+                var assembly = Assembly.LoadFrom(assemblyPath);
+                var type = FindTypeInAssembly(assembly, mappedTypeName, shortTypeName);
+                if (type != null)
+                {
+                    return type;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return null;
+    }
+
+    private static Type? FindTypeInAssembly(Assembly assembly, string mappedTypeName, string shortTypeName)
+    {
+        try
+        {
+            return assembly.GetType(mappedTypeName) ??
+                assembly.GetExportedTypes().FirstOrDefault(type => TypeNameMatches(type, shortTypeName));
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            return ex.Types
+                .Where(type => type != null)
+                .FirstOrDefault(type => TypeNameMatches(type!, shortTypeName));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool TypeNameMatches(Type type, string shortTypeName)
+    {
+        var typeName = type.Name;
+        var tickIndex = typeName.IndexOf('`');
+        if (tickIndex >= 0)
+        {
+            typeName = typeName.Substring(0, tickIndex);
+        }
+
+        return string.Equals(typeName, shortTypeName, StringComparison.Ordinal) ||
+            string.Equals(type.FullName, shortTypeName, StringComparison.Ordinal);
+    }
+
+    private static string? WriteKnownExternalTypeStub(string typeName)
+    {
+        var source = typeName switch
+        {
+            "IActionResult" => """
+                namespace Microsoft.AspNetCore.Mvc
+                {
+                    public interface IActionResult
+                    {
+                        System.Threading.Tasks.Task ExecuteResultAsync(ActionContext context);
+                    }
+                }
+                """,
+            _ => null
+        };
+
+        if (source == null)
+        {
+            return null;
+        }
+
+        var directory = Path.Combine(Path.GetTempPath(), "VSIXClassView", "DecompiledTypes");
+        Directory.CreateDirectory(directory);
+        var filePath = Path.Combine(directory, $"{typeName}.cs");
+        File.WriteAllText(filePath, source, Encoding.UTF8);
+
+        return filePath;
+    }
+
+    private static string WriteFrameworkTypeStub(Type type)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "VSIXClassView", "DecompiledTypes");
+        Directory.CreateDirectory(directory);
+
+        var fileName = string.Concat(type.FullName!
+            .Select(character => Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
+        var filePath = Path.Combine(directory, $"{fileName}.cs");
+        File.WriteAllText(filePath, BuildFrameworkTypeStub(type), Encoding.UTF8);
+
+        return filePath;
+    }
+
+    private static string BuildFrameworkTypeStub(Type type)
+    {
+        var builder = new StringBuilder();
+        if (!string.IsNullOrEmpty(type.Namespace))
+        {
+            builder.AppendLine($"namespace {type.Namespace}");
+            builder.AppendLine("{");
+        }
+
+        var indent = string.IsNullOrEmpty(type.Namespace) ? string.Empty : "    ";
+        builder.Append(indent);
+        builder.Append(GetTypeDeclaration(type));
+        builder.AppendLine();
+        builder.Append(indent);
+        builder.AppendLine("{");
+
+        if (type.IsEnum)
+        {
+            foreach (var name in Enum.GetNames(type))
+            {
+                builder.Append(indent);
+                builder.Append("    ");
+                builder.AppendLine($"{name},");
+            }
+        }
+        else
+        {
+            AppendFrameworkFields(builder, type, indent);
+            AppendFrameworkConstructors(builder, type, indent);
+            AppendFrameworkProperties(builder, type, indent);
+            AppendFrameworkMethods(builder, type, indent);
+        }
+
+        builder.Append(indent);
+        builder.AppendLine("}");
+        if (!string.IsNullOrEmpty(type.Namespace))
+        {
+            builder.AppendLine("}");
+        }
+
+        return builder.ToString();
+    }
+
+    private static string GetTypeDeclaration(Type type)
+    {
+        var keyword = type.IsInterface
+            ? "interface"
+            : type.IsEnum ? "enum" : type.IsValueType ? "struct" : "class";
+        return $"public {keyword} {GetTypeDisplayName(type)}";
+    }
+
+    private static void AppendFrameworkFields(StringBuilder builder, Type type, string indent)
+    {
+        foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+            .OrderBy(field => field.Name, StringComparer.Ordinal))
+        {
+            builder.Append(indent);
+            builder.Append("    ");
+            builder.Append(field.IsStatic ? "static " : string.Empty);
+            builder.AppendLine($"{GetTypeDisplayName(field.FieldType)} {field.Name};");
+        }
+    }
+
+    private static void AppendFrameworkConstructors(StringBuilder builder, Type type, string indent)
+    {
+        foreach (var constructor in type.GetConstructors(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+        {
+            builder.Append(indent);
+            builder.Append("    ");
+            builder.AppendLine($"public {GetTypeDisplayName(type)}({GetParameterList(constructor.GetParameters())}) {{ }}");
+        }
+    }
+
+    private static void AppendFrameworkProperties(StringBuilder builder, Type type, string indent)
+    {
+        foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+            .OrderBy(property => property.Name, StringComparer.Ordinal))
+        {
+            builder.Append(indent);
+            builder.Append("    ");
+            builder.AppendLine($"public {GetTypeDisplayName(property.PropertyType)} {property.Name} {{ get; set; }}");
+        }
+    }
+
+    private static void AppendFrameworkMethods(StringBuilder builder, Type type, string indent)
+    {
+        foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+            .Where(method => !method.IsSpecialName)
+            .OrderBy(method => method.Name, StringComparer.Ordinal))
+        {
+            builder.Append(indent);
+            builder.Append("    ");
+            builder.Append(method.IsStatic ? "static " : string.Empty);
+            builder.AppendLine($"{GetTypeDisplayName(method.ReturnType)} {method.Name}({GetParameterList(method.GetParameters())}) {{ }}");
+        }
+    }
+
+    private static string GetParameterList(ParameterInfo[] parameters)
+    {
+        return string.Join(", ", parameters.Select(parameter => $"{GetTypeDisplayName(parameter.ParameterType)} {parameter.Name}"));
+    }
+
+    private static string GetTypeDisplayName(Type type)
+    {
+        if (type == typeof(void))
+        {
+            return "void";
+        }
+
+        if (type.IsGenericParameter)
+        {
+            return type.Name;
+        }
+
+        if (type.IsArray)
+        {
+            return $"{GetTypeDisplayName(type.GetElementType()!)}[]";
+        }
+
+        var alias = type.FullName switch
+        {
+            "System.Boolean" => "bool",
+            "System.Byte" => "byte",
+            "System.Char" => "char",
+            "System.Decimal" => "decimal",
+            "System.Double" => "double",
+            "System.Int16" => "short",
+            "System.Int32" => "int",
+            "System.Int64" => "long",
+            "System.Object" => "object",
+            "System.Single" => "float",
+            "System.String" => "string",
+            _ => null
+        };
+
+        if (alias != null)
+        {
+            return alias;
+        }
+
+        if (!type.IsGenericType)
+        {
+            return type.Name;
+        }
+
+        var genericName = type.Name;
+        var tickIndex = genericName.IndexOf('`');
+        if (tickIndex >= 0)
+        {
+            genericName = genericName.Substring(0, tickIndex);
+        }
+
+        return $"{genericName}<{string.Join(", ", type.GetGenericArguments().Select(GetTypeDisplayName))}>";
+    }
+
+    private IEnumerable<string> GetSolutionReferenceAssemblyPaths()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var projects = _dte?.Solution?.Projects;
+        if (projects == null)
+        {
+            yield break;
+        }
+
+        foreach (Project project in projects)
+        {
+            foreach (var assemblyPath in GetProjectReferenceAssemblyPaths(project))
+            {
+                yield return assemblyPath;
+            }
+        }
+    }
+
+    private static IEnumerable<string> GetProjectReferenceAssemblyPaths(Project project)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        foreach (var assemblyPath in GetProjectReferencePaths(project))
+        {
+            yield return assemblyPath;
+        }
+
+        ProjectItems? projectItems = null;
+        try
+        {
+            projectItems = project.ProjectItems;
+        }
+        catch
+        {
+        }
+
+        if (projectItems == null)
+        {
+            yield break;
+        }
+
+        foreach (ProjectItem projectItem in projectItems)
+        {
+            Project? subProject = null;
+            try
+            {
+                subProject = projectItem.SubProject;
+            }
+            catch
+            {
+            }
+
+            if (subProject == null)
+            {
+                continue;
+            }
+
+            foreach (var assemblyPath in GetProjectReferenceAssemblyPaths(subProject))
+            {
+                yield return assemblyPath;
+            }
+        }
+    }
+
+    private static IEnumerable<string> GetProjectReferencePaths(Project project)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        object? references = null;
+        try
+        {
+            references = project.Object
+                ?.GetType()
+                .InvokeMember("References", BindingFlags.GetProperty, null, project.Object, null);
+        }
+        catch
+        {
+        }
+
+        if (references == null)
+        {
+            yield break;
+        }
+
+        System.Collections.IEnumerable? enumerableReferences = references as System.Collections.IEnumerable;
+        if (enumerableReferences == null)
+        {
+            yield break;
+        }
+
+        foreach (var reference in enumerableReferences)
+        {
+            string? path = null;
+            try
+            {
+                path = reference
+                    .GetType()
+                    .InvokeMember("Path", BindingFlags.GetProperty, null, reference, null) as string;
+            }
+            catch
+            {
+            }
+
+            if (!string.IsNullOrEmpty(path) &&
+                path!.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) &&
+                File.Exists(path))
+            {
+                yield return path;
+            }
+        }
+    }
+
+    private IEnumerable<string> GetSolutionCSharpFiles()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var projects = _dte?.Solution?.Projects;
+        if (projects == null)
+        {
+            yield break;
+        }
+
+        foreach (Project project in projects)
+        {
+            foreach (var filePath in GetProjectCSharpFiles(project))
+            {
+                yield return filePath;
+            }
+        }
+    }
+
+    private static IEnumerable<string> GetProjectCSharpFiles(Project project)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        ProjectItems? projectItems;
+        try
+        {
+            projectItems = project.ProjectItems;
+        }
+        catch
+        {
+            yield break;
+        }
+
+        if (projectItems == null)
+        {
+            yield break;
+        }
+
+        foreach (var filePath in GetProjectItemCSharpFiles(projectItems))
+        {
+            yield return filePath;
+        }
+    }
+
+    private static IEnumerable<string> GetProjectItemCSharpFiles(ProjectItems projectItems)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        foreach (ProjectItem projectItem in projectItems)
+        {
+            short fileCount;
+            try
+            {
+                fileCount = projectItem.FileCount;
+            }
+            catch
+            {
+                fileCount = 0;
+            }
+
+            for (short index = 1; index <= fileCount; index++)
+            {
+                string? filePath;
+                try
+                {
+                    filePath = projectItem.FileNames[index];
+                }
+                catch
+                {
+                    filePath = null;
+                }
+
+                if (!string.IsNullOrEmpty(filePath) &&
+                    filePath!.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) &&
+                    File.Exists(filePath))
+                {
+                    yield return filePath;
+                }
+            }
+
+            ProjectItems? childItems = null;
+            try
+            {
+                childItems = projectItem.ProjectItems;
+            }
+            catch
+            {
+            }
+
+            if (childItems != null)
+            {
+                foreach (var filePath in GetProjectItemCSharpFiles(childItems))
+                {
+                    yield return filePath;
+                }
+            }
+
+            Project? subProject = null;
+            try
+            {
+                subProject = projectItem.SubProject;
+            }
+            catch
+            {
+            }
+
+            if (subProject != null)
+            {
+                foreach (var filePath in GetProjectCSharpFiles(subProject))
+                {
+                    yield return filePath;
+                }
+            }
+        }
+    }
+
+    private static string GetClickableShortTypeName(string typeName)
+    {
+        var trimmedTypeName = typeName.Trim();
+        var stopIndex = trimmedTypeName.IndexOfAny(new[] { '<', '?', '[', '(', ',', ' ' });
+        return stopIndex < 0
+            ? trimmedTypeName
+            : trimmedTypeName.Substring(0, stopIndex);
     }
 
     private Document? GetTextViewDocument(MemberItem item)

@@ -178,16 +178,14 @@ namespace VSIXProject1
                         DeclaringClassName = classDisplayName,
                         DisplayText = displayText,
                         DisplayParts = FieldIsConst(f)
-                            ? Parts(
-                                (v.Identifier.ValueText, true, true),
-                                (" : ", false, false),
-                                (fieldType, true, false),
-                                ($" = {v.Initializer?.Value}", false, false))
-                            : Parts(
-                                (v.Identifier.ValueText, true, true),
-                                (" : ", false, false),
-                                (fieldType, true, false),
-                                (initializerText, false, false)),
+                            ? Combine(
+                                Parts((v.Identifier.ValueText, true, true), (" : ", false, false)),
+                                GetTypeDisplayParts(f.Declaration.Type),
+                                Parts(($" = {v.Initializer?.Value}", false, false)))
+                            : Combine(
+                                Parts((v.Identifier.ValueText, true, true), (" : ", false, false)),
+                                GetTypeDisplayParts(f.Declaration.Type),
+                                Parts((initializerText, false, false))),
                         Kind = FieldIsConst(f) ? MemberKind.Const : MemberKind.Field,
                         StartOffset = f.SpanStart,
                         NameStartOffset = v.Identifier.SpanStart,
@@ -218,17 +216,14 @@ namespace VSIXProject1
                         DeclaringClassName = classDisplayName,
                         DisplayText = displayText,
                         DisplayParts = string.IsNullOrEmpty(accessorText)
-                            ? Parts(
-                                (p.Identifier.ValueText, true, true),
-                                (" : ", false, false),
-                                (propertyType, true, false),
-                                (initializerText, false, false))
-                            : Parts(
-                                (p.Identifier.ValueText, true, true),
-                                (" : ", false, false),
-                                (propertyType, true, false),
-                                ($" {accessorText}", false, false),
-                                (initializerText, false, false)),
+                            ? Combine(
+                                Parts((p.Identifier.ValueText, true, true), (" : ", false, false)),
+                                GetTypeDisplayParts(p.Type),
+                                Parts((initializerText, false, false)))
+                            : Combine(
+                                Parts((p.Identifier.ValueText, true, true), (" : ", false, false)),
+                                GetTypeDisplayParts(p.Type),
+                                Parts(($" {accessorText}", false, false), (initializerText, false, false))),
                         Kind = MemberKind.Property,
                         StartOffset = p.SpanStart,
                         NameStartOffset = p.Identifier.SpanStart,
@@ -253,8 +248,13 @@ namespace VSIXProject1
                     var parameterDisplayParts = GetParameterDisplayParts(m.ParameterList);
                     var asyncPrefix = MethodHasAsyncModifier(m) ? "async " : string.Empty;
                     var methodDisplayParts = MethodHasAsyncModifier(m)
-                        ? Parts(("async ", false, false), (returnType, true, false), (" : ", false, false), (methodDisplayName, true, true), (" (", false, false))
-                        : Parts((returnType, true, false), (" : ", false, false), (methodDisplayName, true, true), (" (", false, false));
+                        ? Combine(
+                            Parts(("async ", false, false)),
+                            GetTypeDisplayParts(m.ReturnType),
+                            Parts((" : ", false, false), (methodDisplayName, true, true), (" (", false, false)))
+                        : Combine(
+                            GetTypeDisplayParts(m.ReturnType),
+                            Parts((" : ", false, false), (methodDisplayName, true, true), (" (", false, false)));
                     return new MemberItem
                     {
                         Name = m.Identifier.ValueText,
@@ -356,8 +356,13 @@ namespace VSIXProject1
             var parameterDisplayParts = GetParameterDisplayParts(localFunction.ParameterList);
             var asyncPrefix = LocalFunctionHasAsyncModifier(localFunction) ? "async " : string.Empty;
             var methodDisplayParts = LocalFunctionHasAsyncModifier(localFunction)
-                ? Parts(("async ", false, false), (returnType, true, false), (" : ", false, false), (methodDisplayName, true, true), (" (", false, false))
-                : Parts((returnType, true, false), (" : ", false, false), (methodDisplayName, true, true), (" (", false, false));
+                ? Combine(
+                    Parts(("async ", false, false)),
+                    GetTypeDisplayParts(localFunction.ReturnType),
+                    Parts((" : ", false, false), (methodDisplayName, true, true), (" (", false, false)))
+                : Combine(
+                    GetTypeDisplayParts(localFunction.ReturnType),
+                    Parts((" : ", false, false), (methodDisplayName, true, true), (" (", false, false)));
 
             return new MemberItem
             {
@@ -643,7 +648,7 @@ namespace VSIXProject1
                     parameter.Identifier.ValueText,
                     isParameterName: true));
                 parts.Add(new MemberDisplayPart(": "));
-                parts.Add(new MemberDisplayPart(GetShortTypeName(parameter.Type), isBold: true));
+                parts.AddRange(GetTypeDisplayParts(parameter.Type));
                 if (parameter.Default != null)
                 {
                     parts.Add(new MemberDisplayPart($" = {parameter.Default.Value}"));
@@ -656,8 +661,113 @@ namespace VSIXProject1
         private static IReadOnlyList<MemberDisplayPart> Parts(params (string Text, bool IsBold, bool IsMemberName)[] parts)
         {
             return parts
-                .Select(part => new MemberDisplayPart(part.Text, part.IsBold, part.IsMemberName))
+                .Select(part => new MemberDisplayPart(
+                    part.Text,
+                    part.IsBold,
+                    part.IsMemberName,
+                    isTypeName: part.IsBold &&
+                        !part.IsMemberName &&
+                        !string.Equals(part.Text, "void", StringComparison.Ordinal)))
                 .ToList();
+        }
+
+        private static IReadOnlyList<MemberDisplayPart> Combine(params IEnumerable<MemberDisplayPart>[] partGroups)
+        {
+            return partGroups.SelectMany(partGroup => partGroup).ToList();
+        }
+
+        private static IReadOnlyList<MemberDisplayPart> GetTypeDisplayParts(TypeSyntax? type)
+        {
+            if (type == null)
+            {
+                return TypeNameParts("object");
+            }
+
+            switch (type)
+            {
+                case PredefinedTypeSyntax predefinedType:
+                    return TypeNameParts(predefinedType.Keyword.ValueText);
+
+                case IdentifierNameSyntax identifierName:
+                    return TypeNameParts(identifierName.Identifier.ValueText);
+
+                case GenericNameSyntax genericName:
+                    return Combine(
+                        TypeNameParts(genericName.Identifier.ValueText),
+                        Parts(("<", false, false)),
+                        GetTypeArgumentDisplayParts(genericName.TypeArgumentList.Arguments),
+                        Parts((">", false, false)));
+
+                case QualifiedNameSyntax qualifiedName:
+                    return GetTypeDisplayParts(qualifiedName.Right);
+
+                case AliasQualifiedNameSyntax aliasQualifiedName:
+                    return GetTypeDisplayParts(aliasQualifiedName.Name);
+
+                case NullableTypeSyntax nullableType:
+                    return Combine(GetTypeDisplayParts(nullableType.ElementType), Parts(("?", false, false)));
+
+                case ArrayTypeSyntax arrayType:
+                    return Combine(
+                        GetTypeDisplayParts(arrayType.ElementType),
+                        Parts((string.Concat(arrayType.RankSpecifiers.Select(rank => "[" + new string(',', rank.Rank - 1) + "]")), false, false)));
+
+                case TupleTypeSyntax tupleType:
+                    return GetTupleTypeDisplayParts(tupleType);
+
+                default:
+                    return TypeNameParts(type.ToString());
+            }
+        }
+
+        private static IReadOnlyList<MemberDisplayPart> GetTypeArgumentDisplayParts(SeparatedSyntaxList<TypeSyntax> typeArguments)
+        {
+            var parts = new List<MemberDisplayPart>();
+            for (var index = 0; index < typeArguments.Count; index++)
+            {
+                if (index > 0)
+                {
+                    parts.Add(new MemberDisplayPart(", "));
+                }
+
+                parts.AddRange(GetTypeDisplayParts(typeArguments[index]));
+            }
+
+            return parts;
+        }
+
+        private static IReadOnlyList<MemberDisplayPart> GetTupleTypeDisplayParts(TupleTypeSyntax tupleType)
+        {
+            var parts = new List<MemberDisplayPart> { new("(") };
+            for (var index = 0; index < tupleType.Elements.Count; index++)
+            {
+                if (index > 0)
+                {
+                    parts.Add(new MemberDisplayPart(", "));
+                }
+
+                var element = tupleType.Elements[index];
+                if (!string.IsNullOrEmpty(element.Identifier.ValueText))
+                {
+                    parts.Add(new MemberDisplayPart($"{element.Identifier.ValueText}: "));
+                }
+
+                parts.AddRange(GetTypeDisplayParts(element.Type));
+            }
+
+            parts.Add(new MemberDisplayPart(")"));
+            return parts;
+        }
+
+        private static IReadOnlyList<MemberDisplayPart> TypeNameParts(string text)
+        {
+            return new[]
+            {
+                new MemberDisplayPart(
+                    text,
+                    isBold: true,
+                    isTypeName: !string.Equals(text, "void", StringComparison.Ordinal))
+            };
         }
 
         private static string GetMethodDisplayName(MethodDeclarationSyntax method)

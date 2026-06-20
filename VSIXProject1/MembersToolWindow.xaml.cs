@@ -43,6 +43,7 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
     }
 
     public event Action<MemberItem>? MemberDoubleClicked;
+    public event Action<string>? TypeClicked;
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public MembersToolWindowControl()
@@ -171,6 +172,13 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
     public void ClearMemberSelection()
     {
         ClearSelectedMember();
+    }
+
+    public void SetTypeResolutionInProgress(bool isInProgress)
+    {
+        TypeResolutionOverlay.Visibility = isInProgress
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     public bool HasMemberListFocus()
@@ -495,6 +503,21 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
 
         foreach (var part in parts)
         {
+            if (part.IsTypeName)
+            {
+                var hyperlink = new Hyperlink(new Run(part.Text)
+                {
+                    FontWeight = part.IsBold ? FontWeights.Bold : FontWeights.Normal
+                })
+                {
+                    Tag = part.Text,
+                    Cursor = Cursors.Hand
+                };
+                hyperlink.Click += TypeHyperlink_Click;
+                textBlock.Inlines.Add(hyperlink);
+                continue;
+            }
+
             textBlock.Inlines.Add(new Run(part.Text)
             {
                 FontWeight = part.IsBold ? FontWeights.Bold : FontWeights.Normal,
@@ -502,6 +525,15 @@ public partial class MembersToolWindowControl : UserControl, INotifyPropertyChan
                     ? Brushes.Blue
                     : part.IsMemberName ? _memberNameBrush : textBlock.Foreground
             });
+        }
+    }
+
+    private void TypeHyperlink_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Hyperlink { Tag: string typeName })
+        {
+            TypeClicked?.Invoke(typeName);
+            e.Handled = true;
         }
     }
 

@@ -60,17 +60,20 @@ namespace VSIXProject1
             string text,
             bool isBold = false,
             bool isMemberName = false,
-            bool isParameterName = false)
+            bool isParameterName = false,
+            bool isTypeName = false)
         {
             Text = text;
             IsBold = isBold;
             IsMemberName = isMemberName;
             IsParameterName = isParameterName;
+            IsTypeName = isTypeName;
         }
 
         public string Text { get; }
         public bool IsBold { get; }
         public bool IsMemberName { get; }
         public bool IsParameterName { get; }
+        public bool IsTypeName { get; }
     }
 }
