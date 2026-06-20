@@ -30,7 +30,11 @@ namespace VSIXProject1
                 .FirstOrDefault();
 
             if (currentType == null)
-                return Array.Empty<MemberItem>();
+            {
+                return HasTopLevelStatements(root)
+                    ? GetMembersForTopLevelProgram(root, parsedText, sourceFilePath)
+                    : Array.Empty<MemberItem>();
+            }
 
             return GetMembersForType(currentType, parsedText, sourceFilePath);
         }
@@ -41,12 +45,14 @@ namespace VSIXProject1
             var root = tree.GetCompilationUnitRoot();
             var token = root.FindToken(Math.Max(0, Math.Min(caretOffset, sourceText.Length)));
 
-            return token.Parent?
+            var className = token.Parent?
                 .AncestorsAndSelf()
                 .OfType<BaseTypeDeclarationSyntax>()
                 .Where(IsSupportedType)
                 .FirstOrDefault()
                 ?.Identifier.ValueText;
+
+            return className ?? (HasTopLevelStatements(root) ? "Program" : null);
         }
 
         public static string? GetClassDisplayNameAtCaret(string sourceText, int caretOffset)
@@ -60,7 +66,9 @@ namespace VSIXProject1
                 .Where(IsSupportedType)
                 .FirstOrDefault();
 
-            return currentType == null ? null : GetTypeDisplayName(currentType);
+            return currentType == null
+                ? HasTopLevelStatements(root) ? "Program" : null
+                : GetTypeDisplayName(currentType);
         }
 
         public static IReadOnlyList<MemberItem> GetMembersForClassNameOrFirst(
@@ -78,7 +86,7 @@ namespace VSIXProject1
                 ?? types.FirstOrDefault();
 
             return currentType == null
-                ? Array.Empty<MemberItem>()
+                ? HasTopLevelStatements(root) ? GetMembersForTopLevelProgram(root, parsedText, sourceFilePath) : Array.Empty<MemberItem>()
                 : GetMembersForType(currentType, parsedText, sourceFilePath);
         }
 
@@ -106,7 +114,9 @@ namespace VSIXProject1
                     string.Equals(t.Identifier.ValueText, preferredClassName, StringComparison.Ordinal))
                 ?? types.FirstOrDefault();
 
-            return currentType == null ? null : GetTypeDisplayName(currentType);
+            return currentType == null
+                ? HasTopLevelStatements(root) ? "Program" : null
+                : GetTypeDisplayName(currentType);
         }
 
         public static bool ClassInheritsWindowsFormOrUserControl(
@@ -311,17 +321,84 @@ namespace VSIXProject1
                 .ToList();
         }
 
+        private static IReadOnlyList<MemberItem> GetMembersForTopLevelProgram(
+            CompilationUnitSyntax root,
+            SourceText parsedText,
+            string? sourceFilePath)
+        {
+            const string classDisplayName = "Program";
+            var regions = GetRegions(root, classDisplayName, parsedText, sourceFilePath);
+            var localFunctions = root.Members
+                .OfType<GlobalStatementSyntax>()
+                .Select(globalStatement => globalStatement.Statement)
+                .OfType<LocalFunctionStatementSyntax>()
+                .Select(localFunction => CreateLocalFunctionMemberItem(
+                    localFunction,
+                    classDisplayName,
+                    parsedText,
+                    sourceFilePath))
+                .OrderBy(member => member.Name, StringComparer.OrdinalIgnoreCase);
+
+            return regions
+                .Concat(localFunctions)
+                .ToList();
+        }
+
+        private static MemberItem CreateLocalFunctionMemberItem(
+            LocalFunctionStatementSyntax localFunction,
+            string classDisplayName,
+            SourceText parsedText,
+            string? sourceFilePath)
+        {
+            var span = parsedText.Lines.GetLinePositionSpan(localFunction.Identifier.Span);
+            var returnType = GetShortTypeName(localFunction.ReturnType);
+            var methodDisplayName = GetLocalFunctionDisplayName(localFunction);
+            var parameterDisplayParts = GetParameterDisplayParts(localFunction.ParameterList);
+            var asyncPrefix = LocalFunctionHasAsyncModifier(localFunction) ? "async " : string.Empty;
+            var methodDisplayParts = LocalFunctionHasAsyncModifier(localFunction)
+                ? Parts(("async ", false, false), (returnType, true, false), (" : ", false, false), (methodDisplayName, true, true), (" (", false, false))
+                : Parts((returnType, true, false), (" : ", false, false), (methodDisplayName, true, true), (" (", false, false));
+
+            return new MemberItem
+            {
+                Name = localFunction.Identifier.ValueText,
+                DeclaringClassName = classDisplayName,
+                DisplayText = $"{asyncPrefix}{returnType} : {methodDisplayName} ({GetParameterDisplayText(localFunction.ParameterList)})",
+                DisplayParts = methodDisplayParts
+                    .Concat(parameterDisplayParts)
+                    .Concat(Parts((")", false, false)))
+                    .ToList(),
+                Kind = MemberKind.Method,
+                StartOffset = localFunction.SpanStart,
+                NameStartOffset = localFunction.Identifier.SpanStart,
+                NameLength = localFunction.Identifier.Span.Length,
+                NameStartLine = span.Start.Line,
+                NameStartColumn = span.Start.Character,
+                NameEndLine = span.End.Line,
+                NameEndColumn = span.End.Character,
+                SourceFilePath = sourceFilePath
+            };
+        }
+
         private static IReadOnlyList<MemberItem> GetRegions(
             BaseTypeDeclarationSyntax currentType,
             SourceText parsedText,
             string? sourceFilePath)
         {
             var classDisplayName = GetTypeDisplayName(currentType);
+            return GetRegions(currentType.SyntaxTree.GetCompilationUnitRoot(), classDisplayName, parsedText, sourceFilePath);
+        }
+
+        private static IReadOnlyList<MemberItem> GetRegions(
+            CompilationUnitSyntax root,
+            string classDisplayName,
+            SourceText parsedText,
+            string? sourceFilePath)
+        {
             var regionStack = new Stack<RegionDirectiveTriviaSyntax>();
             var regions = new List<MemberItem>();
 
-            foreach (var directive in currentType.SyntaxTree
-                .GetCompilationUnitRoot()
+            foreach (var directive in root
                 .DescendantTrivia(descendIntoTrivia: true)
                 .Select(trivia => trivia.GetStructure())
                 .OfType<DirectiveTriviaSyntax>()
@@ -484,6 +561,11 @@ namespace VSIXProject1
                 .Where(IsSupportedType);
         }
 
+        private static bool HasTopLevelStatements(CompilationUnitSyntax root)
+        {
+            return root.Members.OfType<GlobalStatementSyntax>().Any();
+        }
+
         private static bool IsSupportedType(BaseTypeDeclarationSyntax typeDeclaration)
         {
             return typeDeclaration is ClassDeclarationSyntax ||
@@ -588,6 +670,16 @@ namespace VSIXProject1
             return $"{method.Identifier.ValueText}{method.TypeParameterList}";
         }
 
+        private static string GetLocalFunctionDisplayName(LocalFunctionStatementSyntax localFunction)
+        {
+            if (localFunction.TypeParameterList == null)
+            {
+                return localFunction.Identifier.ValueText;
+            }
+
+            return $"{localFunction.Identifier.ValueText}{localFunction.TypeParameterList}";
+        }
+
         private static bool FieldIsConst(FieldDeclarationSyntax field)
         {
             return field.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.ConstKeyword));
@@ -596,6 +688,11 @@ namespace VSIXProject1
         private static bool MethodHasAsyncModifier(MethodDeclarationSyntax method)
         {
             return method.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.AsyncKeyword));
+        }
+
+        private static bool LocalFunctionHasAsyncModifier(LocalFunctionStatementSyntax localFunction)
+        {
+            return localFunction.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.AsyncKeyword));
         }
 
         private static string GetPropertyAccessorDisplayText(PropertyDeclarationSyntax property)
